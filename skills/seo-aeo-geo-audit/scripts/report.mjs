@@ -22,8 +22,8 @@ const stText = (tone, label) => `<span class="st tone-${tone}">${esc(label)}</sp
 const st = (s) => stText(...(STATUS[s] || STATUS.na));
 const bandText = (score) => { const b = band(score); return stText(b.tone, b.label); };
 const prio = (c) => (c.status === "fail" && c.weight === 3 ? ["fail", "즉시"] : c.status === "fail" ? ["warn", "단기"] : ["neutral", "권장"]);
-// 점수 게이지: 판정 구간 색 그라디언트 막대 + 점수 위치 ▼ 표시
-const gauge = (score) => `<span class="gauge">${score == null ? "" : `<i style="left:clamp(5px, ${score}%, calc(100% - 5px))"></i>`}</span>`;
+// 점수 게이지: 회색 막대 위에 점수만큼 판정색 한 색 그라디언트로 채우고 끝에 흰 원
+const gauge = (score) => `<span class="gauge gauge--${band(score).tone}">${score == null ? "" : `<i style="width:${score}%"></i>`}</span>`;
 const worstFirst = (a, b) => (a.status === b.status ? b.weight - a.weight : a.status === "fail" ? -1 : 1);
 // 요약 박스 항목: 항목명 한 줄, 측정값과 권장 기준 한 줄. 자르지 않는다.
 const boxItem = (c) => `<li><b>${esc(c.title)}</b><span class="sub">측정값 ${esc(c.value)}, 권장 기준 ${esc(c.criterion)}</span></li>`;
@@ -83,10 +83,11 @@ const GLOSSARY = [
 // 안내 배너 아이콘(lucide lightbulb)
 const BULB = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>';
 // 섹션 머리: 번호 · 제목 · 부제, 오른쪽 점수 블록(한눈에 보기 종합 점수와 같은 구성), 아래 남색 2px 선, 그 아래 설명.
-// scoreRows: [[라벨, 값, 톤]] — 점수표 왼쪽 칸에 가로로 나열(점수는 오른쪽 칸). 값이 0 이면 회색. rowsLabel 은 왼쪽 칸 머리.
+// scoreRows: [[라벨, 값, 톤]] — 점수표 왼쪽 칸에 가로로 나열(점수는 오른쪽 칸). 값이 0 이면 검정. rowsLabel 은 왼쪽 칸 머리.
 function secHead({ num = "", cat = "", title, q = "", score, scoreLabel = "섹션 점수", scoreRows = [], rowsLabel = "점검 결과", desc = "", note = "" }) {
   const b = band(score);
-  const items = scoreRows.map(([k, v, t]) => `<div><span class="tone-${t}">${k}</span><b class="tone-${v ? t : "neutral"}">${v}</b></div>`).join("");
+  // 라벨은 판정색(참고는 검정), 값은 0 이 아니면 판정색 · 0 이거나 참고면 검정
+  const items = scoreRows.map(([k, v, t]) => { const c = t === "neutral" ? "" : `tone-${t}`; return `<div><span class="${c}">${k}</span><b class="${v ? c : ""}">${v}</b></div>`; }).join("");
   const scoreBlock = score === undefined ? "" : `<div class="sec-score"><table class="grade"><thead><tr>${items ? `<th>${esc(rowsLabel)}</th>` : ""}<th class="grade-head-score">${esc(scoreLabel)}</th></tr></thead><tbody><tr>${items ? `<td class="grade-items"><div class="grade-list">${items}</div></td>` : ""}<td class="grade-score"><b>${score ?? "–"}</b><span class="tone-${b.tone}">${b.label}</span></td></tr></tbody></table></div>`;
   return `<header class="sec-head">
 <div class="sec-top"><div class="sec-title">${num ? `<p class="sec-num">${esc(num)}</p>` : ""}<h2>${esc(title)}${cat ? `<span class="sec-cat">${esc(cat)} 영역</span>` : ""}</h2>${q ? `<p class="sec-q">${esc(q)}</p>` : ""}</div>${scoreBlock}</div>
@@ -94,14 +95,10 @@ ${desc ? `<p class="sec-desc">${desc}</p>` : ""}${note ? `<div class="sec-note">
 </header>`;
 }
 
-// 종합 점수 원형 차트
+// 종합 점수 원형 차트: 판정 구간 두 색 원뿔 그라디언트(시작 밝게 → 끝 선명), 시작 · 끝은 둥글게, 끝에 흰 원 핸들. 가운데 점수만
 function ring(score, px = 132, label = "종합 점수") {
-  const b = band(score), r = 52, c = 2 * Math.PI * r;
-  return `<svg class="ring" viewBox="0 0 120 120" width="${px}" height="${px}" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">
-<circle class="ring-track" cx="60" cy="60" r="${r}"/>
-<circle class="ring-arc ring-arc--${b.tone}" cx="60" cy="60" r="${r}" stroke-dasharray="${((c * (score ?? 0)) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 60 60)"/>
-<text class="ring-num" x="60" y="61" text-anchor="middle" dominant-baseline="central">${score ?? "–"}</text>
-</svg>`;
+  const b = band(score);
+  return `<div class="ring ring--${b.tone}" style="--p:${score ?? 0}; --size:${px}px" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">${score ? '<i class="ring-cap"></i><i class="ring-end"></i>' : ""}<span class="ring-num">${score ?? "–"}</span></div>`;
 }
 
 // 종합 점수표: 원형 차트 + 구간 · 설명 + SEO · AEO · GEO 막대

@@ -1,0 +1,6 @@
+node_modules/
+# 점검 결과물은 저장소에 올리지 않는다
+audit-*.html
+audit-*.pdf
+audit-*.json
+.DS_Store

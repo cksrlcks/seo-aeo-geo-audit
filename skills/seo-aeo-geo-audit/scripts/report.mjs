@@ -392,7 +392,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       ["렌더링 비교", "Chrome 으로 렌더링한 본문 텍스트 길이와 원본 HTML 텍스트 길이를 비교해 JavaScript 의존도를 봅니다."],
       ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다.`],
       ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /llms-full.txt, /ai.txt, TLS 인증서 체인, HTTP → HTTPS 리다이렉트, Accept: text/markdown 응답."],
-      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
+      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페)와 나무위키는 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
       ...(r.files?.llmsDraft ? [["llms.txt 초안", `llms.txt 가 없어 사이트맵의 최대 20개 페이지로 초안을 만들었습니다. 결과 폴더의 ${esc(r.files.llmsDraft.split(/[\\/]/).pop())} 를 검토해 사이트 루트에 올리세요.`]] : []),
       ["Lighthouse", lhOk ? `v${esc(lh.version)} ${ff} 프리셋, 성능 · 접근성 · 권장사항 · SEO.` : "측정 안 됨."],
     ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`), "tbl tbl--kv"),

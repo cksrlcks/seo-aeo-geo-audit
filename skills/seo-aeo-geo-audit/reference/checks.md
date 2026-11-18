@@ -166,4 +166,3 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 - RFC 9309 Robots Exclusion Protocol — https://www.rfc-editor.org/rfc/rfc9309
 - sitemaps.org — https://www.sitemaps.org/protocol.html
 - web.dev, Web Vitals — https://web.dev/articles/vitals
-- 처음 점검 항목을 잡을 때 참고한 글: 스튜디오 제이티 SEO 용어집(https://www.studio-jt.co.kr/seo-glossary/), AEO(https://www.studio-jt.co.kr/seo-glossary/aeo/), GEO 가이드(https://www.studio-jt.co.kr/geo-guide/)

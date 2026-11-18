@@ -147,6 +147,12 @@ const CITE_PARTS = [
   ["unique", "고유성", 10, "자체 데이터, 실제 사례, 사용한 도구를 구체적으로 쓰세요."],
 ];
 const weakest = (p) => CITE_PARTS.reduce((w, c) => (p.parts[c[0]] / c[2] < p.parts[w[0]] / w[2] ? c : w));
+// review.json 의 고정 항목. reference/ai-review.md 의 표와 이름 · 순서 · weight 가 같아야 한다(render.mjs 가 검사).
+export const REVIEW_BRAND = [["네이버", 25], ["위키", 20], ["YouTube", 15], ["뉴스 · 업계 매체", 10], ["커뮤니티", 10], ["LinkedIn", 10]];
+export const REVIEW_EEAT = ["경험", "전문성", "권위", "신뢰"];
+export const REVIEW_PLATFORMS = ["Google AI 오버뷰", "ChatGPT 검색", "Perplexity", "Gemini", "Copilot", "네이버 AI 브리핑"];
+// PDF 버퍼의 쪽 수
+export const countPages = (buf) => (Buffer.from(buf).toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
 // Claude 판단 평가(review.json)의 점수. 브랜드는 배점 합 대비 100점 환산, E-E-A-T 는 4개 합, 플랫폼은 평균.
 export function reviewScores(v) {
   if (!v) return null;
@@ -332,7 +338,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
   const aiReview = chapter("ai", `${aiNum}  브랜드 · AI 판단 평가`, [
     secHead({
       num: aiNum, title: "브랜드 · AI 판단 평가", cat: "참고", q: "외부 브랜드 언급, E-E-A-T, AI 플랫폼별 준비도",
-      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 조회와 공식 채널 수집은 스크립트가 하고, 채점과 E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
+      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 · YouTube 조회와 공식 채널 수집은 스크립트가 하고, 채점과 E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
     }),
     rv ? statCards([scoreStat(rv.brand, "브랜드 언급"), scoreStat(rv.eeat, "E-E-A-T"), scoreStat(rv.platform, "AI 플랫폼 준비도"), scoreStat(cite?.score ?? null, "문단 인용 가능성")]) : "",
     `<h3>위키 · 포털 검색 · 공식 채널 (자동 조회)</h3>`,
@@ -342,11 +348,12 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       ["Wikidata", wikiCell(b.wikidata)],
       ...(b.search ? [
         ["네이버 검색", portalCell(b.search.naver)],
-        ["나무위키", !b.search.namu.ok ? stText("neutral", "확인 불가") : b.search.namu.found ? `${stText("pass", "있음")}<span class="sub">${esc(b.search.namu.title)}</span>` : stText("neutral", "없음")],
+        ["나무위키", !b.search.namu.ok ? stText("neutral", "확인 불가") : b.search.namu.found ? `${stText("pass", "있음")}<span class="sub">${esc(b.search.namu.doc || b.search.namu.title)}${b.search.namu.via ? ` (${esc(b.search.namu.via)})` : ""}</span>` : stText("neutral", "없음")],
+        ...(b.search.youtube ? [["YouTube 검색", !b.search.youtube.ok ? stText("neutral", "확인 불가") : `채널 ${b.search.youtube.channels.length}개 · 영상 ${b.search.youtube.videos.length}개${b.search.youtube.channels.length ? `<span class="sub">${b.search.youtube.channels.slice(0, 2).map((c) => esc(c.name)).join(", ")}</span>` : ""}`]] : []),
       ] : []),
       ["공식 채널", b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : stText("neutral", "sameAs · 페이지 링크에서 찾지 못함")],
     ].map(([k, x]) => `<tr><th>${k}</th><td>${x}</td></tr>`), "tbl tbl--kv"),
-    `<p class="caption">위키 문서는 이름이 정확히 같은 문서만 찾습니다. 네이버 · 나무위키는 Chrome 으로 직접 연 화면을 기록한 것이라 동명 회사 결과가 섞일 수 있으니 아래 Claude 확인 결과와 함께 보세요.</p>`,
+    `<p class="caption">위키 문서는 이름이 정확히 같은 문서만 찾습니다. 네이버 · 나무위키 · YouTube 는 Chrome 으로 직접 연 화면을 기록한 것이라 동명 회사 결과가 섞일 수 있으니 아래 Claude 확인 결과와 함께 보세요.</p>`,
     ...(v
       ? [
           `<h3>브랜드 언급 (검색 확인)</h3>`,
@@ -392,7 +399,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       ["렌더링 비교", "Chrome 으로 렌더링한 본문 텍스트 길이와 원본 HTML 텍스트 길이를 비교해 JavaScript 의존도를 봅니다."],
       ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다.`],
       ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /llms-full.txt, /ai.txt, TLS 인증서 체인, HTTP → HTTPS 리다이렉트, Accept: text/markdown 응답."],
-      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페)와 나무위키는 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
+      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페) · 나무위키 · YouTube 검색은 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
       ...(r.files?.llmsDraft ? [["llms.txt 초안", `llms.txt 가 없어 사이트맵의 최대 20개 페이지로 초안을 만들었습니다. 결과 폴더의 ${esc(r.files.llmsDraft.split(/[\\/]/).pop())} 를 검토해 사이트 루트에 올리세요.`]] : []),
       ["Lighthouse", lhOk ? `v${esc(lh.version)} ${ff} 프리셋, 성능 · 접근성 · 권장사항 · SEO.` : "측정 안 됨."],
     ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`), "tbl tbl--kv"),

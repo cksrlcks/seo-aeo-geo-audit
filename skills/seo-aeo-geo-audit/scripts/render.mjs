@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
-import { paginate, renderFlow } from "./report.mjs";
+import { countPages, paginate, renderFlow, REVIEW_BRAND, REVIEW_EEAT, REVIEW_PLATFORMS } from "./report.mjs";
 
 const args = process.argv.slice(2);
 const ri = args.indexOf("--review");
@@ -16,17 +16,28 @@ if (!json || (ri >= 0 && !reviewPath)) { console.error("사용법: node render.m
 const base = outArg || json.replace(/\.json$/i, "");
 const result = JSON.parse(readFileSync(json, "utf8"));
 
-// review.json 검증: 형식이 틀리면 보고서를 만들지 않고 어디가 틀렸는지 알려 준다.
+// review.json 검증: 형식이 틀리면 보고서를 만들지 않고 어디가 틀렸는지 알려 준다. 필수 · 선택 필드는 reference/ai-review.md 표.
 function validateReview(v) {
   const errs = [];
   const num = (x, lo, hi, where) => { if (typeof x !== "number" || !Number.isFinite(x) || x < lo || x > hi) errs.push(`${where}: ${lo} ~ ${hi} 사이 숫자여야 합니다 (받은 값 ${JSON.stringify(x)})`); };
   const str = (x, where) => { if (typeof x !== "string" || !x.trim()) errs.push(`${where}: 빈 문자열이 아니어야 합니다`); };
-  if (!Array.isArray(v?.brand?.items) || !v.brand.items.length) errs.push("brand.items: 배열이 필요합니다");
-  else v.brand.items.forEach((i, k) => { str(i.platform, `brand.items[${k}].platform`); str(i.found, `brand.items[${k}].found`); num(i.weight, 1, 100, `brand.items[${k}].weight`); num(i.score, 0, i.weight ?? 0, `brand.items[${k}].score`); });
-  if (!Array.isArray(v?.eeat) || v.eeat.length !== 4) errs.push("eeat: 4개 항목(경험 · 전문성 · 권위 · 신뢰) 배열이 필요합니다");
-  else v.eeat.forEach((e, k) => { str(e.name, `eeat[${k}].name`); str(e.evidence, `eeat[${k}].evidence`); num(e.score, 0, 25, `eeat[${k}].score`); });
-  if (!Array.isArray(v?.platforms) || !v.platforms.length) errs.push("platforms: 배열이 필요합니다");
-  else v.platforms.forEach((p, k) => { str(p.name, `platforms[${k}].name`); str(p.strengths, `platforms[${k}].strengths`); num(p.score, 0, 100, `platforms[${k}].score`); });
+  const opt = (x, where) => { if (x !== undefined && x !== null && typeof x !== "string") errs.push(`${where}: 문자열이거나 없어야 합니다`); };
+  // 이름 · 순서가 기준표와 같은지
+  const names = (list, key, want, where) => {
+    if (!Array.isArray(list) || list.length !== want.length) return errs.push(`${where}: ${want.length}개 항목(${want.join(" · ")}) 배열이 필요합니다`), false;
+    list.forEach((x, k) => { if (x?.[key] !== want[k]) errs.push(`${where}[${k}].${key}: "${want[k]}" 이어야 합니다 (받은 값 ${JSON.stringify(x?.[key])})`); });
+    return true;
+  };
+  if (names(v?.brand?.items, "platform", REVIEW_BRAND.map(([n]) => n), "brand.items"))
+    v.brand.items.forEach((i, k) => {
+      const w = REVIEW_BRAND[k][1];
+      if (i.weight !== w) errs.push(`brand.items[${k}].weight: ${w} 이어야 합니다 (받은 값 ${JSON.stringify(i.weight)})`);
+      str(i.found, `brand.items[${k}].found`); num(i.score, 0, w, `brand.items[${k}].score`); opt(i.url, `brand.items[${k}].url`);
+    });
+  if (names(v?.eeat, "name", REVIEW_EEAT, "eeat"))
+    v.eeat.forEach((e, k) => { str(e.evidence, `eeat[${k}].evidence`); str(e.fix, `eeat[${k}].fix`); num(e.score, 0, 25, `eeat[${k}].score`); });
+  if (names(v?.platforms, "name", REVIEW_PLATFORMS, "platforms"))
+    v.platforms.forEach((p, k) => { str(p.strengths, `platforms[${k}].strengths`); str(p.gaps, `platforms[${k}].gaps`); num(p.score, 0, 100, `platforms[${k}].score`); });
   return errs;
 }
 if (reviewPath) {
@@ -56,10 +67,12 @@ await p.setContent(renderFlow(result), { waitUntil: "networkidle0", timeout: 450
 await p.evaluate(() => document.fonts.ready).catch(() => {});
 const pages = await p.evaluate(paginate);
 await writeFile(base + ".html", "<!doctype html>\n" + (await p.evaluate(() => document.documentElement.outerHTML)));
-await p.pdf({ path: base + ".pdf", printBackground: true, preferCSSPageSize: true });
+const buf = await p.pdf({ path: base + ".pdf", printBackground: true, preferCSSPageSize: true });
+const pdfPages = countPages(buf);
 await browser.close();
 if (reviewPath) {
-  result.files = { ...result.files, html: base + ".html", pdf: base + ".pdf", pages };
+  result.files = { ...result.files, html: base + ".html", pdf: base + ".pdf", pages, pdfPages, pdfBytes: buf.length };
   await writeFile(base + ".json", JSON.stringify(result, null, 2));
 }
-console.log(`${pages}쪽 → ${base}.html, ${base}.pdf`);
+console.log(`HTML ${pages}쪽 · PDF ${pdfPages}쪽 → ${base}.html, ${base}.pdf`);
+if (pages !== pdfPages) { console.log(`! HTML ${pages}쪽과 PDF ${pdfPages}쪽이 다릅니다. 쪽 높이를 넘친 블록이 있는지 확인하세요.`); process.exitCode = 3; }

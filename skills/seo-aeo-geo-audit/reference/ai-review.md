@@ -8,29 +8,49 @@
 ## 공통 규칙
 
 - 근거는 점검 JSON(`checks[]`, `facts`, `brand`, `citability`)과 직접 연 페이지 · 검색 결과만 쓴다. 기억이나 추측으로 채우지 않는다.
-- 확인하지 못한 항목(차단 · 로그인 · 검색 실패)은 0점으로 두고 `found` 에 "확인 불가: 이유" 를 적는다. 있다고 가정하지 않는다.
+- **평가 전에 운영 주체부터 확인한다.** 사이트 하단 사업자 정보 · 문의 페이지 · 개인정보처리방침에서 상호를 찾는다. 브랜드 소유자와 사이트 운영자가 다를 수 있다(예: 호텔 브랜드 사이트를 분양 시행사가 운영). E-E-A-T `권위` 의 `evidence` 첫 문장에 적는다. 예: "사이트 운영: ○○㈜(분양 시행사), 브랜드: ○○ 그룹".
+- **같은 실체로 확정한 결과만 센다.** 사이트 주소 · 업종 · 지역 · 대표자 · 운영 주체로 확인한다. 하나라도 어긋나 확정하지 못하면 세지 않고, `found` 에 "같은 실체 확인 안 됨: 이유" 를 적는다. 예: 기사 속 대표 이름이 사업자 정보의 대표와 다름.
+- **정보 패널 · 지식백과 · 위키 문서가 다른 실체면 0점이다.** 헤딩(`기본정보` 등)만 보고 세지 않는다. 혼동 위험은 해당 AI 플랫폼(네이버 AI 브리핑 등)의 `gaps` 에 적는다.
+- **영업 · 광고 · 채용 글은 제3자 언급으로 세지 않는다.** 네이버 블로그 · 카페, 커뮤니티, YouTube 영상 모두 같다. 분양 · 회원권 영업, 체험단 · 협찬 표시, 구인 글이 여기에 든다.
+- **같은 기사는 두 칸에서 모두 센다.** "네이버 뉴스" 는 네이버 뉴스 탭에 노출되는지만 보고, "뉴스 · 업계 매체" 는 매체 기사 건수를 본다.
+- **건수 단계**: 건수로 매기는 칸은 아래 표에 적힌 단계만 쓴다. 중간 점수를 만들지 않는다.
+- **`found` 문구는 두 가지를 구분한다.**
+  - 찾아봤지만 없음: "검색 결과 없음 (<검색어>, <확인 수단>)"
+  - 도구 한계로 못 봄: "확인 불가: <이유>" (차단 화면 · 로그인 · 결과가 잘림 · 확인 수단 없음)
+  - 둘 다 0점이다. 있다고 가정하지 않는다.
 - 문구는 보고서에 그대로 실리므로 고객이 읽을 한국어 문장으로 쓴다. 과장 · 결과 보장 표현 금지.
 
 ## 1. 브랜드 언급 (100점 환산)
 
-브랜드명은 점검 JSON 의 `brand.name`. 동명 브랜드와 헷갈리지 않게 사이트 주소 · 업종으로 같은 실체인지 확인한다.
+브랜드명은 점검 JSON 의 `brand.name`.
 
-**네이버 · 나무위키는 직접 열지 않고 점검 JSON 의 `brand.search` 를 근거로 쓴다.** 스크립트가 Chrome 으로 연 화면 기록이다(한국어 · 서울 시간대 · 일반 데스크톱 UA).
-- `brand.search.naver` 의 `total` · `news`(최신순) · `blog` · `cafe` 탭마다: `officialRank`(포털 도메인을 뺀 외부 도메인 중 공식 사이트 순서), `headings`(영역 제목), `items`(브랜드 키워드 `brand.search.keys` 가 제목에 든 결과 링크 · 문맥, 최대 15), `text`(화면 텍스트 앞 3,000자).
-- `items` 에는 동명 회사 결과가 섞인다. 문맥과 주소로 같은 실체인 것만 센다.
-- `brand.search.namu.found`: true 문서 있음, false 404. 문서명이 다를 수 있으니 없으면 웹 검색으로 다른 문서명을 한 번 찾아본다.
-- 탭이 `ok: false`(차단 화면 · 오류)일 때만 웹 검색으로 대신 확인하고, 그래도 안 되면 0점 + "확인 불가".
+**네이버 · 나무위키 · YouTube 는 직접 열지 않고 점검 JSON 의 `brand.search` 를 근거로 쓴다.** 스크립트가 Chrome 으로 연 화면 기록이다(한국어 · 서울 시간대 · 일반 데스크톱 UA).
+- `brand.search.naver` 의 `total` · `news`(최신순) · `blog` · `cafe` 탭마다:
+  - `officialRank`: 포털 도메인을 뺀 외부 도메인 중 공식 사이트 순서
+  - `headings`: 영역 제목
+  - `items`: 브랜드 키워드 `brand.search.keys` 가 제목에 든 결과 링크 · 문맥, 최대 15
+  - `text`: 화면 텍스트 앞부분(통합검색 8,000자, 나머지 3,000자)
+- `items` 에는 동명 회사 결과가 섞인다. 공통 규칙대로 같은 실체인 것만 센다.
+- `brand.search.namu`
+  - `found`: true 문서 있음, false 404.
+  - `doc`: 실제로 연 문서명(넘겨주기 반영).
+  - 브랜드명 그대로 열어 404 이고 네이버 통합검색에 나무위키 링크가 있으면, 스크립트가 그 문서로 다시 연다. 이때 `tried` 에 처음 연 주소, `via` 에 "네이버 통합검색 링크" 가 남는다.
+  - 그래도 없으면 웹 검색으로 다른 문서명을 한 번 찾아본다.
+- `brand.search.youtube`: YouTube 검색 결과 화면.
+  - `channels`: 채널 결과(`name` · `href` · `meta` 구독자 수), 최대 5
+  - `videos`: 영상 결과(`title` · `href` · `channel` · `channelHref` · `meta` 조회수 · 올린 시점), 최대 15
+- 탭이 `ok: false`(차단 화면 · 오류)일 때만 웹 검색으로 대신 확인한다. 그래도 안 되면 0점 + "확인 불가".
 
-| platform | weight | 만점 조건 | 확인 방법 |
+| platform | weight | 세부 배점 | 확인 방법 |
 |---|---|---|---|
-| 네이버 | 25 | 브랜드 검색 시 공식 사이트가 상위 노출 + 지식백과 · 인물정보 · 플레이스 등 정보 영역 + 뉴스 · 블로그 · 카페에 제3자 언급 다수 | `brand.search.naver`. 공식 사이트 노출 10(`total.officialRank` 1 ~ 3: 10, 4 ~ 10: 5), 정보 영역 5(`total.headings` · `text`), 뉴스 5(`news.items` 중 같은 실체, 최근 2년), 블로그 · 카페 5(공식 블로그 외 제3자 글) |
-| 위키 (나무위키 · 위키백과 · Wikidata) | 20 | 나무위키 문서 + 위키백과(ko 또는 en) + Wikidata 항목 | `brand.search.namu`, `brand.wikipedia`, `brand.wikidata`. 나무위키 8, 위키백과 8, Wikidata 4 |
-| YouTube | 15 | 공식 채널 + 제3자 리뷰 · 소개 영상 | 웹 검색 `site:youtube.com <브랜드>`. 공식 채널 7, 제3자 영상 8 |
-| 뉴스 · 업계 매체 | 10 | 최근 2년 안의 언론 · 업계 매체 기사 3건 이상 | 웹 검색. 3건 이상 10, 1 ~ 2건 5 |
-| 커뮤니티 (Reddit · 국내 커뮤니티 · 지식iN) | 10 | 제3자 질문 · 추천 글에서 브랜드가 언급됨 | 웹 검색 `site:reddit.com <브랜드>`, `brand.search.naver.cafe` 의 이용자 글(영업 · 광고 글 제외). 여러 건 10, 1건 5 |
-| LinkedIn | 10 | 회사 페이지 + 활동(게시물 · 직원 연결) | 웹 검색 `site:linkedin.com/company <브랜드>`. 페이지 5, 활동 5 |
+| 네이버 | 25 | 공식 사이트 노출 10: `total.officialRank` 1 ~ 3 → 10, 4 ~ 10 → 5, 그 밖 0<br>정보 영역 5: 같은 실체의 지식백과 · 인물정보 · 기업 정보 · 플레이스 패널 있음 5, 없거나 다른 실체 0<br>뉴스 5: `news.items` 중 같은 실체 · 최근 2년 기사 0건 0 / 1 ~ 2건 2 / 3건 이상 5<br>블로그 · 카페 5: 공식 블로그 · 영업 · 광고 · 채용 글을 뺀 제3자 글 0건 0 / 1 ~ 2건 2 / 3건 이상 5 | `brand.search.naver` (`total.headings` · `text`, `news` · `blog` · `cafe` 의 `items`) |
+| 위키 | 20 | 나무위키 8, 위키백과(ko 또는 en) 8, Wikidata 4. 같은 실체 문서만 | `brand.search.namu`, `brand.wikipedia`, `brand.wikidata` |
+| YouTube | 15 | 공식 채널 7: 같은 실체의 공식 채널 있음 7, 없음 0<br>제3자 영상 8: 공식 채널 · 영업 · 광고 영상을 뺀 같은 실체 영상 0건 0 / 1 ~ 2건 4 / 3건 이상 8 | `brand.search.youtube` (`channels`, `videos` 의 `channel`), `brand.channels` |
+| 뉴스 · 업계 매체 | 10 | 최근 2년 안의 같은 실체 기사 0건 0 / 1 ~ 2건 5 / 3건 이상 10 | 웹 검색, `brand.search.naver.news` |
+| 커뮤니티 | 10 | Reddit · 국내 커뮤니티 · 지식iN 의 제3자 질문 · 추천 글(영업 · 광고 글 제외) 0건 0 / 1 ~ 2건 5 / 3건 이상 10 | 웹 검색 `site:reddit.com <브랜드>`, `brand.search.naver.cafe` 의 이용자 글 |
+| LinkedIn | 10 | 회사 페이지 5: 있음 5, 없음 0<br>활동 5: 최근 1년 게시물 보임 5 / 게시물은 없지만 팔로워 · 직원 연결 표시 2 / 그 밖 0 | 웹 검색 `site:linkedin.com/company <브랜드>` |
 
-`brand.items` 는 위 6개를 이 순서 · 이 weight 로 모두 쓴다. `score` 는 0 ~ weight. 배점 합 90 을 보고서가 100점으로 환산한다. 다음(Daum) 검색은 확인하지 않는다.
+`brand.items` 는 위 6개를 이 순서 · 이 `platform` 이름 · 이 `weight` 로 모두 쓴다. `score` 는 세부 배점의 합(0 ~ weight). `found` 에 세부 배점별 근거를 짧게 쓴다. 예: "공식 사이트 1위(10), 정보 영역 없음(0), 뉴스 3건(5), 제3자 블로그 1건(2)". 배점 합 90 을 보고서가 100점으로 환산한다. 다음(Daum) 검색은 확인하지 않는다.
 
 ## 2. E-E-A-T (4 × 25 = 100점)
 
@@ -43,23 +63,30 @@
 | 권위 | 회사 소개 충실, 외부 인용 · 수상 · 언론 보도, sameAs 로 공식 채널 연결 | 회사 소개만 있음 | 운영 주체 정보 빈약 |
 | 신뢰 | HTTPS, 연락처 · 주소 · 사업자 정보, 개인정보처리방침, 출처 표기, 게시 · 갱신일 | 일부 빠짐 | 대부분 빠짐 |
 
-`evidence` 에 판단 근거(페이지에서 본 것)를, `fix` 에 가장 효과가 큰 개선 한 가지를 쓴다.
+`evidence` 에 판단 근거(페이지에서 본 것)를, `fix` 에 가장 효과가 큰 개선 한 가지를 쓴다. `권위` 의 `evidence` 는 운영 주체로 시작한다(공통 규칙).
 
 ## 3. AI 플랫폼별 준비도 (각 100점, 평균)
 
-각 플랫폼 점수 = 접근(40) + 내용 구조(30) + 출처 · 엔티티 신호(30). 접근은 점검 JSON 에서 계산하고, 나머지는 판단한다.
+각 플랫폼 점수 = 접근(40) + 내용 구조(30) + 출처 · 엔티티 신호(30).
+
+**접근 40** (점검 JSON): 해당 봇이 모두 허용이고 SSR 통과면 40, 하나라도 차단 · SSR 실패면 0, 그 밖(SSR 주의 등)은 20.
+
+**내용 구조 30 · 출처 · 엔티티 30** 은 아래 하위 항목의 합이다.
+- `checks[]` id 가 적힌 항목은 그 상태로 매긴다: 통과(pass) 만점, 주의(warn) 절반(소수점 버림), 실패(fail) · 해당 없음(na) 0.
+- id 가 `콘텐츠 / 메인` 으로 둘이면 점검 JSON 의 `pageType` 이 content 일 때 앞, home 일 때 뒤를 쓴다.
+- id 가 없는 항목만 판단하며, 적힌 단계만 쓴다.
 
 | name | 접근 40 (점검 JSON) | 내용 구조 30 | 출처 · 엔티티 30 |
 |---|---|---|---|
-| Google AI 오버뷰 | Googlebot 허용 · noindex 없음 · SSR | 질문형 소제목 · 즉답 문단 · 비교 표 | Organization · Article 스키마, 저자 · 날짜 |
-| ChatGPT 검색 | OAI-SearchBot · ChatGPT-User 허용, bot-probe 정상 | 출처 붙은 사실 문장 | Wikipedia · Wikidata, sameAs |
-| Perplexity | PerplexityBot · Perplexity-User 허용 | 짧고 직접적인 답, 수치 | 커뮤니티(Reddit 등) 언급, 최신 갱신일 |
-| Gemini | Googlebot 허용(Google-Extended 차단은 감점 없음) | Google AI 오버뷰와 같음 | YouTube 채널 · 영상, Google 비즈니스 프로필 |
-| Copilot | Bingbot 허용 | 명확한 제목 · 메타 설명 | LinkedIn 회사 페이지, Bing 색인 |
-| 네이버 AI 브리핑 | `facts.koBots` 의 Yeti 허용, SSR | 질문형 소제목 · 즉답, 네이버 블로그 · 카페 원문과 겹치는 주제 | 네이버 검색 노출(브랜드 언급 1번 결과), 네이버 블로그 · 플레이스 등 공식 채널 |
+| Google AI 오버뷰 | Googlebot 허용 · noindex 없음 · SSR | 소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-sentence`<br>목록 · 본문 텍스트 10 `lists-tables / service-text` | 페이지 유형 스키마 10 `ld-content-type`<br>엔티티 · sameAs 10 `ld-entity`<br>저자 · 날짜 10: 콘텐츠는 `author` · `dates` 둘 다 통과 10, 하나 5, 없음 0 / 메인은 `org-details` |
+| ChatGPT 검색 | OAI-SearchBot · ChatGPT-User 허용, bot-probe 정상 | 출처 붙은 수치 10 `sourced-stats / intro-sentence`<br>외부 출처 링크 10 `outbound-sources / service-text`<br>즉답 10 `direct-answer / intro-snippet` | 위키백과 10: `brand.wikipedia` ko 또는 en 같은 실체 문서 있음 10, 없음 0<br>Wikidata 10: `brand.wikidata` 같은 실체 있음 10, 없음 0<br>sameAs 10 `ld-entity` |
+| Perplexity | PerplexityBot · Perplexity-User 허용 | 즉답 10 `direct-answer / intro-sentence`<br>수치 10: 콘텐츠는 `sourced-stats` / 메인은 본문에 수치(연도 · 규모 · 가격 등) 문장 3개 이상 10, 1 ~ 2개 5, 없음 0<br>목록 · 소제목 10 `lists-tables / section-headings` | 커뮤니티 언급 15: 브랜드 언급 `커뮤니티` 점수 10 → 15, 5 → 8, 0 → 0<br>최신 갱신 15 `freshness / site-freshness` (주의 7) |
+| Gemini | Googlebot 허용(Google-Extended 차단은 감점 없음) | Google AI 오버뷰의 내용 구조 점수를 그대로 쓴다 | Organization · sameAs 10 `ld-entity`<br>YouTube 10: 공식 채널 있음 5 + 제3자 영상 1건 이상 5 (브랜드 언급 YouTube 칸과 같은 근거)<br>Google 비즈니스 프로필 10: 웹 검색으로 같은 실체 프로필 · 지도 결과를 확인하면 10, 아니면 0 |
+| Copilot | Bingbot 허용 | 제목 · 메타 10: `title` · `meta-description` 둘 다 통과 10, 하나 5, 없음 0<br>소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-snippet` | LinkedIn 회사 페이지 10: 브랜드 언급 LinkedIn 의 페이지 5점이면 10, 아니면 0<br>사이트맵 10 `sitemap`<br>sameAs 10 `ld-entity` |
+| 네이버 AI 브리핑 | `facts.koBots` 의 Yeti 허용, SSR | 소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-sentence`<br>네이버 원문 10: `brand.search.naver` 블로그 · 카페에서 같은 실체 제3자 글(영업 · 광고 제외) 3건 이상 10, 1 ~ 2건 5, 없음 0 | 네이버 검색 노출 10: `total.officialRank` 1 ~ 3 → 10, 4 ~ 10 → 5, 그 밖 0<br>정보 영역 10: 브랜드 언급 네이버의 정보 영역 5점이면 10, 아니면 0<br>네이버 공식 채널 10: 같은 실체의 네이버 블로그 · 플레이스 · 스마트스토어 등 2개 이상 10, 1개 5, 없음 0 (`brand.channels`, `brand.search.naver`) |
 
-접근 40 은 해당 봇이 모두 허용이고 SSR 통과면 40, 하나라도 차단 · SSR 실패면 0, 그 밖(SSR 주의 등)은 20. 6개 플랫폼을 이 순서로 모두 쓴다.
-`strengths` 에 강점, `gaps` 에 부족한 점을 한두 문장씩 쓴다.
+6개 플랫폼을 이 순서 · 이 `name` 으로 모두 쓴다.
+`strengths` 에 강점, `gaps` 에 부족한 점을 한두 문장씩 쓴다. 다른 실체와 혼동될 위험(동명 회사 정보 패널, 비슷한 이름의 영업 도메인)이 있으면 `gaps` 에 적는다.
 
 ## review.json 형식
 
@@ -67,13 +94,13 @@
 {
   "brand": {
     "items": [
-      { "platform": "네이버", "weight": 25, "score": 15, "found": "브랜드 검색 시 공식 사이트 1위, 블로그 언급 다수, 지식백과 · 뉴스 없음", "url": "https://search.naver.com/search.naver?query=..." }
+      { "platform": "네이버", "weight": 25, "score": 17, "found": "공식 사이트 1위(10), 정보 영역 없음(0), 뉴스 3건(5), 제3자 블로그 1건(2)", "url": "https://search.naver.com/search.naver?query=..." }
     ]
   },
   "eeat": [
     { "name": "경험", "score": 12, "evidence": "…", "fix": "…" },
     { "name": "전문성", "score": 10, "evidence": "…", "fix": "…" },
-    { "name": "권위", "score": 14, "evidence": "…", "fix": "…" },
+    { "name": "권위", "score": 14, "evidence": "사이트 운영: …. …", "fix": "…" },
     { "name": "신뢰", "score": 20, "evidence": "…", "fix": "…" }
   ],
   "platforms": [
@@ -82,4 +109,18 @@
 }
 ```
 
-`render.mjs` 가 형식(개수 · 점수 범위 · 빈 문구)을 검사하고, 틀리면 보고서를 만들지 않고 오류 위치를 출력한다.
+| 위치 | 필드 | 필수 | 규칙 |
+|---|---|---|---|
+| `brand.items[]` | `platform` | 필수 | 6개, 순서 · 이름 고정: "네이버", "위키", "YouTube", "뉴스 · 업계 매체", "커뮤니티", "LinkedIn" |
+| | `weight` | 필수 | 25 · 20 · 15 · 10 · 10 · 10 고정 |
+| | `score` | 필수 | 0 ~ weight |
+| | `found` | 필수 | 빈 문자열 금지 |
+| | `url` | 선택 | 대표 근거 주소. 있으면 보고서에 작게 표시 |
+| `eeat[]` | `name` | 필수 | 4개, 순서 고정: 경험 · 전문성 · 권위 · 신뢰 |
+| | `score` | 필수 | 0 ~ 25 |
+| | `evidence` · `fix` | 필수 | 빈 문자열 금지 |
+| `platforms[]` | `name` | 필수 | 6개, 순서 · 이름 고정: Google AI 오버뷰 · ChatGPT 검색 · Perplexity · Gemini · Copilot · 네이버 AI 브리핑 |
+| | `score` | 필수 | 0 ~ 100 |
+| | `strengths` · `gaps` | 필수 | 빈 문자열 금지 |
+
+`render.mjs` 가 이 표대로 검사하고, 틀리면 보고서를 만들지 않고 오류 위치를 출력한다. 항목 이름 · 순서 · weight 는 `scripts/report.mjs` 의 `REVIEW_BRAND` · `REVIEW_EEAT` · `REVIEW_PLATFORMS` 와 같아야 한다(이 표를 바꾸면 같이 고친다). 보고서를 만든 뒤 HTML · PDF 쪽수를 세어 함께 출력하며, 다르면 경고하고 종료 코드 3 으로 끝난다.

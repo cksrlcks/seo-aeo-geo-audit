@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import puppeteer from "puppeteer-core";
-import { paginate, renderFlow } from "./report.mjs";
+import { countPages, paginate, renderFlow } from "./report.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 버전은 플러그인 plugin.json 한 곳에서 관리한다(scripts → 스킬 → skills → 플러그인 루트). 단독 실행이면 package.json.
@@ -205,6 +205,14 @@ const AI_BOTS = [
   { token: "Amazonbot", vendor: "Amazon", role: "검색 · Alexa", citation: false },
 ];
 
+// 소켓(fetch keep-alive · 실패한 TLS 연결)이 닫히는 중에 바로 process.exit 하면 Windows 에서
+// libuv assertion(src\win\async.c)으로 비정상 종료한다. 출력을 비우고 다음 루프까지 기다린 뒤 끝낸다.
+async function quit(code) {
+  await new Promise((r) => process.stdout.write("", r));
+  await new Promise((r) => setTimeout(r, 50));
+  process.exit(code);
+}
+
 // ---------- 메인 ----------
 const startedAt = new Date();
 const chromePath = findChrome();
@@ -218,10 +226,10 @@ if (page.status === 0) {
   if (/certificate|CERT_|TLS|SSL/i.test(page.error || "") && !process.execArgv.includes("--use-system-ca")) {
     console.error(`! TLS 검증 실패(${page.error}). 시스템 인증서 저장소(--use-system-ca)로 다시 시도합니다.`);
     const r = spawnSync(process.execPath, ["--use-system-ca", ...process.argv.slice(1), "--tls-retry"], { stdio: "inherit" });
-    process.exit(r.status ?? 1);
+    await quit(r.status ?? 1);
   }
   console.error(`페이지를 가져올 수 없습니다: ${page.error}`);
-  process.exit(2);
+  await quit(2);
 }
 if (opts.tlsRetry) notes.push("서버 인증서 체인이 불완전해 일반 크롤러 방식의 첫 접속이 실패했습니다. 이 점검은 운영체제 인증서 저장소로 다시 접속해 진행했습니다. 상세는 기술 기본 · 페이지 경험 섹션의 ‘TLS 인증서 체인 검증’ 항목을 보세요.");
 const finalUrl = new URL(page.url);
@@ -267,7 +275,7 @@ async function detectPageType() {
 const detected = await detectPageType();
 if (opts.detect) {
   console.log(JSON.stringify({ url: page.url, ...detected }, null, 2));
-  process.exit(0);
+  await quit(0);
 }
 const pageType = opts.pageType || detected.type || "content";
 const HOME = pageType === "home";
@@ -822,7 +830,7 @@ add(S.evidence, "length", "본문 분량", 1,
       got.length ? got.join(", ") : "없음");
   }
   {
-    const tel = anchors.some((a) => /^tel:/i.test(a.href)) || /(0\d{1,2}|1\d{3})[-.\s]\d{3,4}[-.\s]\d{4}|\b1[5-9]\d{2}-\d{4}\b/.test(bodyText) || !!(orgNode?.telephone || orgNode?.contactPoint);
+    const tel = anchors.some((a) => /^tel:/i.test(a.href)) || /(0\d{1,2}|1\d{3})[-.\s]\d{3,4}[-.\s]\d{4}|\b1[5-9]\d{2}\s*[-.]\s*\d{4}\b/.test(bodyText) || !!(orgNode?.telephone || orgNode?.contactPoint);
     const mail = anchors.some((a) => /^mailto:/i.test(a.href)) || /[\w.+-]+@[\w-]+\.[\w.]+/.test(bodyText) || !!orgNode?.email;
     const got = [tel && "전화", mail && "이메일"].filter(Boolean);
     add(S.evidence, "contact-info", "연락 수단 표기", 2,
@@ -1140,7 +1148,8 @@ const PORTAL_HOST = /(^|\.)(naver\.(com|net)|pstatic\.net|daum\.(net|co\.kr)|kak
 // 브랜드 키워드: 전체 이름, 첫 단어(“반얀트리 부산 해운대” → “반얀트리”), 도메인 이름(uxis)
 const brandKeys = [...new Set([brandName, brandName.split(/\s+/)[0], host.split(".")[0]].filter((k) => k && k.length >= 2))];
 const BRAND_KEY = brandKeys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-async function browse(url) {
+// waitFor: 스크립트로 그리는 화면(YouTube)은 결과 요소가 뜰 때까지 기다린다. extract: 그 화면 전용으로 더 뽑을 값(페이지 안에서 실행).
+async function browse(url, { waitFor, extract } = {}) {
   if (!browser) return { ok: false, url, error: "Chrome 없음" };
   const p = await browser.newPage();
   try {
@@ -1148,6 +1157,7 @@ async function browse(url) {
     await p.setExtraHTTPHeaders({ "accept-language": "ko-KR,ko;q=0.9" });
     await p.emulateTimezone("Asia/Seoul");
     const res = await p.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    if (waitFor) await p.waitForSelector(waitFor, { timeout: 10000 }).catch(() => {});
     await new Promise((ok) => setTimeout(ok, 1500));
     const snap = await p.evaluate((host, portal, keySrc) => {
       const t = (s) => (s || "").replace(/\s+/g, " ").trim();
@@ -1172,11 +1182,14 @@ async function browse(url) {
         title: t(document.title),
         headings: [...new Set([...document.querySelectorAll("h2, h3")].map((e) => t(e.innerText)).filter((s) => s && s.length <= 40))].slice(0, 30),
         // 통합 검색은 기업 정보 패널까지 보이게 길게 남긴다.
-        officialRank: at < 0 ? null : at + 1, items, text: t(document.body?.innerText).slice(0, /[?&]query=/.test(location.search) && !/where=|ssc=/.test(location.search) ? 8000 : 3000),
+        // 화면에 나온 첫 나무위키 문서 링크(네이버 통합검색에서 실제 문서명을 찾는 데 쓴다)
+        namuLink: anchors.map((a) => a.href).find((h) => /^https:\/\/namu\.wiki\/w\/[^?#]+/.test(h))?.replace(/[?#].*$/, "") || null,
+        officialRank: at < 0 ? null : at + 1, items, text:t(document.body?.innerText).slice(0, /[?&]query=/.test(location.search) && !/where=|ssc=/.test(location.search) ? 8000 : 3000),
       };
     }, host, PORTAL_HOST.source, BRAND_KEY);
+    if (extract) Object.assign(snap, await p.evaluate(extract));
     const status = res?.status() ?? 0;
-    const blocked = /just a moment|attention required|자동입력 방지|비정상적인 (접근|검색)/i.test(snap.title + " " + snap.text.slice(0, 500));
+    const blocked = /just a moment|attention required|자동입력 방지|비정상적인 (접근|검색)|before you continue/i.test(snap.title + " " + snap.text.slice(0, 500));
     return { ok: status > 0 && status < 500 && !blocked, status, url, blocked, ...snap };
   } catch (e) {
     return { ok: false, url, error: e.message };
@@ -1192,7 +1205,7 @@ const PORTAL_TABS = {
     cafe: (q) => `https://search.naver.com/search.naver?ssc=tab.cafe.all&sm=tab_jum&nso=so:dd,p:all&query=${q}`,
   },
 };
-console.error("▶ 위키 · Wikidata 조회, llms.txt 초안, 네이버 · 나무위키 화면 확인 중…");
+console.error("▶ 위키 · Wikidata 조회, llms.txt 초안, 네이버 · 나무위키 · YouTube 화면 확인 중…");
 const [wikiKo, wikiEn, wikidata, llmsDraft] = await Promise.all([wikiLookup("ko"), wikiLookup("en"), wikidataLookup(), buildLlmsDraft()]);
 // 포털에는 한 번에 하나씩, 사이에 잠깐 쉬며 연다.
 const search = { keys: brandKeys };
@@ -1203,8 +1216,25 @@ for (const [portal, tabs] of Object.entries(PORTAL_TABS)) {
     await new Promise((ok) => setTimeout(ok, 1200));
   }
 }
-search.namu = await browse(`https://namu.wiki/w/${encodeURIComponent(brandName)}`);
+// 나무위키: 브랜드명 그대로 연다. 404 인데 네이버 통합검색에 나무위키 문서 링크가 있으면 그 문서로 한 번 더 연다(문서명이 다른 경우).
+const namuFirst = `https://namu.wiki/w/${encodeURIComponent(brandName)}`;
+search.namu = await browse(namuFirst);
+const namuAlt = search.naver.total.namuLink;
+if (search.namu.ok && search.namu.status === 404 && namuAlt && namuAlt !== namuFirst) search.namu = { ...(await browse(namuAlt)), tried: [namuFirst], via: "네이버 통합검색 링크" };
 search.namu.found = search.namu.ok ? search.namu.status === 200 : null; // 404 면 문서 없음
+search.namu.doc = search.namu.found ? search.namu.title.replace(/\s*-\s*나무위키\s*$/, "") : null; // 실제로 연 문서명(넘겨주기 반영)
+// YouTube: 검색 결과 화면에서 채널 · 영상 제목과 채널명을 추린다(제3자 영상 판단용). 스크립트로 그리는 화면이라 결과 요소를 기다린다.
+search.youtube = await browse(`https://www.youtube.com/results?search_query=${encodeURIComponent(brandName)}`, {
+  waitFor: "ytd-video-renderer, ytd-channel-renderer",
+  extract: () => {
+    const t = (s) => (s || "").replace(/\s+/g, " ").trim();
+    const href = (a) => a?.href?.replace(/[&?]pp=[^&]*/, "") || null;
+    return {
+      channels: [...document.querySelectorAll("ytd-channel-renderer")].slice(0, 5).map((r) => ({ name: t(r.querySelector("#channel-title")?.innerText), href: href(r.querySelector("a")), meta: t(r.querySelector("#metadata")?.innerText) })),
+      videos: [...document.querySelectorAll("ytd-video-renderer")].slice(0, 15).map((r) => ({ title: t(r.querySelector("#video-title")?.innerText), href: href(r.querySelector("a#video-title")), channel: t(r.querySelector("ytd-channel-name a")?.innerText), channelHref: href(r.querySelector("ytd-channel-name a")), meta: t(r.querySelector("#metadata-line")?.innerText) })),
+    };
+  },
+});
 const brand = { name: brandName, wikipedia: { ko: wikiKo, en: wikiEn }, wikidata, channels, search };
 // Claude 의 플랫폼 평가(네이버 AI 브리핑)에 쓰는 네이버 검색 봇 robots.txt 판정. 점수 미반영.
 const koBots = ["Yeti"].map((token) => ({ token, ...robotsAllows(robots, token, finalUrl.pathname) }));
@@ -1264,7 +1294,6 @@ const base = path.join(opts.out, `audit-${host}${slug ? "-" + slug : ""}-${stamp
 result.author = opts.author;
 result.files = { json: base + ".json", html: base + ".html", pdf: opts.pdf && browser ? base + ".pdf" : null, pages: null, pdfPages: null, pdfBytes: null, llmsDraft: llmsDraft ? base + "-llms-draft.txt" : null };
 if (llmsDraft) await writeFile(result.files.llmsDraft, llmsDraft);
-const countPages = (buf) => (buf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
 
 // 흐름 HTML 을 브라우저에서 A4 쪽으로 나눈 뒤, 그 DOM 을 HTML 로 저장하고 같은 DOM 을 PDF 로 인쇄한다.
 let reportHtml = renderFlow(result);
@@ -1295,7 +1324,7 @@ sections.forEach((s) => console.log(`  - ${s.name}: ${s.score ?? "–"} (통과 
 console.log(`참고(종합 미포함): 문단 인용 가능성 ${citability.score ?? "–"} (${citability.count}개 문단) · 브랜드 "${brandName}" 위키백과 ko ${wikiKo.found ? "있음" : "없음"} / en ${wikiEn.found ? "있음" : "없음"} · Wikidata ${wikidata.found ? wikidata.id : "없음"} · 공식 채널 ${channels.length}개`);
 const fail = (s) => `확인 불가(${s.error || (s.blocked ? "차단 화면" : `HTTP ${s.status}`)})`;
 const portalLine = (k, p) => `${k} ${!p.total.ok ? fail(p.total) : p.total.officialRank ? `공식 사이트 ${p.total.officialRank}번째` : "공식 사이트 없음"}, ${["news", "blog", "cafe"].map((t) => `${{ news: "뉴스", blog: "블로그", cafe: "카페" }[t]} ${p[t].ok ? `${p[t].items.length}건` : "확인 불가"}`).join(" · ")}`;
-console.log(`브라우저 확인(브랜드 키워드 ${brandKeys.join(", ")}): ${portalLine("네이버", search.naver)} | 나무위키 ${!search.namu.ok ? fail(search.namu) : search.namu.found ? "문서 있음" : "문서 없음"}`);
+console.log(`브라우저 확인(브랜드 키워드 ${brandKeys.join(", ")}): ${portalLine("네이버", search.naver)} | 나무위키 ${!search.namu.ok ? fail(search.namu) : search.namu.found ? `문서 있음(${search.namu.doc})` : "문서 없음"} | YouTube ${search.youtube.ok ? `채널 ${search.youtube.channels.length}개 · 영상 ${search.youtube.videos.length}개` : fail(search.youtube)}`);
 console.log("\n우선 개선 과제:");
 topFixes.forEach((c, i) => console.log(`  ${i + 1}. [${c.status === "fail" ? "실패" : "주의"}] ${c.title} — ${c.detail}`));
 notes.forEach((n) => console.log(`  ※ ${n}`));

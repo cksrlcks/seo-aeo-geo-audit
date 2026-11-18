@@ -77,7 +77,7 @@ function findChrome() {
 }
 
 // 리다이렉트를 직접 따라가며 홉 수를 기록한다 (fetch 의 자동 follow 는 체인을 숨긴다).
-async function fetchFollow(url, { ua = BROWSER_UA, maxHops = 10, timeout = 20000 } = {}) {
+async function fetchFollow(url, { ua = BROWSER_UA, maxHops = 10, timeout = 20000, accept = "text/html,application/xhtml+xml,text/plain,*/*;q=0.8" } = {}) {
   const hops = [];
   let current = url;
   for (let i = 0; i <= maxHops; i++) {
@@ -86,7 +86,7 @@ async function fetchFollow(url, { ua = BROWSER_UA, maxHops = 10, timeout = 20000
       res = await fetch(current, {
         redirect: "manual",
         signal: AbortSignal.timeout(timeout),
-        headers: { "user-agent": ua, accept: "text/html,application/xhtml+xml,text/plain,*/*;q=0.8", "accept-language": "ko,en;q=0.8" },
+        headers: { "user-agent": ua, accept, "accept-language": "ko,en;q=0.8" },
       });
     } catch (e) {
       return { ok: false, status: 0, error: e.cause?.message || e.message, url: current, hops, text: "", headers: {} };
@@ -194,6 +194,9 @@ const AI_BOTS = [
   { token: "PerplexityBot", vendor: "Perplexity", role: "검색 · 인용", citation: true, probeUa: "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/perplexitybot)" },
   { token: "Perplexity-User", vendor: "Perplexity", role: "사용자 요청 시 방문", citation: true },
   { token: "DuckAssistBot", vendor: "DuckDuckGo", role: "검색 · 인용", citation: true },
+  { token: "Applebot", vendor: "Apple", role: "검색 · Siri · Spotlight", citation: true },
+  { token: "MistralAI-User", vendor: "Mistral", role: "사용자 요청 시 방문 (Le Chat)", citation: true },
+  { token: "Meta-ExternalFetcher", vendor: "Meta", role: "사용자 요청 시 방문 (Meta AI)", citation: true },
   { token: "Google-Extended", vendor: "Google", role: "Gemini 학습 · 그라운딩 제어 토큰", citation: false },
   { token: "Applebot-Extended", vendor: "Apple", role: "학습 제어 토큰", citation: false },
   { token: "Bytespider", vendor: "ByteDance", role: "모델 학습", citation: false },
@@ -283,8 +286,8 @@ async function renderedText(url) {
   try {
     await p.setUserAgent(BROWSER_UA);
     await p.goto(url, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => p.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }));
-    const text = await p.evaluate(() => document.body?.innerText || "");
-    return { text: norm(text) };
+    const [text, ldCount] = await p.evaluate(() => [document.body?.innerText || "", document.querySelectorAll('script[type="application/ld+json"]').length]);
+    return { text: norm(text), ldCount };
   } catch (e) {
     return { error: e.message };
   } finally {
@@ -335,9 +338,15 @@ async function probeBots() {
 }
 
 console.error("▶ robots.txt · sitemap · llms.txt · AI 봇 응답 · 렌더링 비교 수집 중…");
-const [llmsRes, aiTxtRes, probes, rendered, tlsRes] = await Promise.all([
+// HTTP 주소가 HTTPS 로 보내는지는 첫 응답만 본다. 80 포트가 닫혀 있으면(null) 중복 주소가 없으니 정상으로 친다.
+const httpProbe = () => fetch(`http://${finalUrl.host}${finalUrl.pathname}${finalUrl.search}`, { redirect: "manual", signal: AbortSignal.timeout(10000), headers: { "user-agent": BROWSER_UA } })
+  .then((r) => { r.body?.cancel().catch(() => {}); return { status: r.status, location: r.headers.get("location") || "" }; }, () => null);
+const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes] = await Promise.all([
   fetchFollow(origin + "/llms.txt"),
+  fetchFollow(origin + "/llms-full.txt"),
   fetchFollow(origin + "/ai.txt"),
+  fetchFollow(page.url, { accept: "text/markdown", timeout: 15000 }),
+  finalUrl.protocol === "https:" ? httpProbe() : Promise.resolve(null),
   probeBots(),
   renderedText(page.url),
   finalUrl.protocol === "https:" ? tlsProbe(finalUrl.hostname, Number(finalUrl.port) || 443) : Promise.resolve(null),
@@ -350,7 +359,7 @@ const headerText = $("head title").map((_, e) => norm($(e).text())).get();
 const title = headerText[0] || "";
 const descs = $('meta[name="description"]').map((_, e) => norm($(e).attr("content"))).get();
 const canonicals = $('link[rel="canonical"]').map((_, e) => $(e).attr("href")).get().filter(Boolean);
-const robotsMeta = $('meta[name="robots"], meta[name="googlebot"]').map((_, e) => norm($(e).attr("content")).toLowerCase()).get().join(", ");
+const robotsMeta = $('meta[name="robots"], meta[name="googlebot"], meta[name="bingbot"]').map((_, e) => norm($(e).attr("content")).toLowerCase()).get().join(", ");
 const xRobots = (page.headers["x-robots-tag"] || "").toLowerCase();
 const robotsDirectives = `${robotsMeta} ${xRobots}`;
 const og = (p) => norm($(`meta[property="${p}"]`).attr("content"));
@@ -458,6 +467,12 @@ const llmsOk = llmsRes.ok && !/^\s*<(!doctype|html)/i.test(llmsRes.text) && llms
 const llmsLines = llmsOk ? llmsRes.text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
 const llmsFormat = llmsOk ? { h1: /^#\s+\S/.test(llmsLines[0] || ""), quote: llmsLines.some((l) => /^>\s*\S/.test(l)), links: llmsLines.filter((l) => /^-\s*\[[^\]]+\]\(https?:\/\/[^)]+\)/.test(l)).length } : null;
 const aiTxtOk = aiTxtRes.ok && !/^\s*<(!doctype|html)/i.test(aiTxtRes.text) && aiTxtRes.text.trim().length > 0;
+const llmsFullOk = llmsFullRes.ok && !/^\s*<(!doctype|html)/i.test(llmsFullRes.text) && llmsFullRes.text.trim().length > 0;
+// Cloudflare 가 응답 단계에서 robots.txt 앞에 붙이는 관리 블록. 서버 파일에는 없어 운영자가 모르는 경우가 많다.
+const cfManaged = robotsIsText && /#\s*BEGIN Cloudflare Managed content/i.test(robotsRes.text);
+// Content Signals (contentsignals.org): "Content-Signal: search=yes, ai-input=yes, ai-train=no"
+const contentSignals = robotsIsText ? [...robotsRes.text.matchAll(/^\s*content-signal\s*:\s*(.+)$/gim)].map((m) => m[1].replace(/#.*/, "").trim()).filter(Boolean) : [];
+const mdOk = mdRes.ok && /text\/markdown/i.test(mdRes.headers["content-type"] || "");
 
 // AI 봇 표
 const bots = AI_BOTS.map((b) => {
@@ -488,12 +503,18 @@ const CRITERIA = {
   ssr: "렌더링 대비 70% 이상",
   "llms-txt": "H1, 요약, 링크 목록",
   "ai-txt": "선택 사항",
+  "cf-managed": "의도한 정책인지 확인",
+  "content-signal": "선택 사항",
+  "md-negotiation": "선택 사항",
   "ld-present": "JSON-LD, 파싱 오류 없음",
   "ld-valid": "schema.org 와 @type",
   "ld-content-type": "Article, WebPage 등",
   "ld-entity": "Organization + sameAs",
   "ld-match": "headline = 제목 · H1",
   "faq-note": "점수 미반영",
+  "ld-extra": "점수 미반영",
+  "ld-author": "Person, 직함 · 소개 URL · sameAs",
+  "retired-schema": "점수 미반영",
   "question-headings": "30% 이상",
   "direct-answer": "70% 이상",
   "intro-length": "600자 이하",
@@ -514,7 +535,8 @@ const CRITERIA = {
   og: "3개 모두",
   viewport: "width=device-width",
   hreflang: "ISO 코드, 자기 참조, x-default",
-  https: "HTTPS",
+  https: "HTTPS, HTTP 는 301 로 이동",
+  "security-headers": "점수 미반영",
   "tls-chain": "공개 루트로 검증",
   redirects: "1회 이하",
   "robots-txt": "Sitemap 지시어 포함",
@@ -574,18 +596,34 @@ add(S.crawl, "bot-probe", "AI 봇 User-Agent 실제 요청 응답", 2,
 }
 add(S.crawl, "llms-txt", "llms.txt (비공식 제안)", 1,
   !llmsOk ? "fail" : llmsFormat.h1 && llmsFormat.quote && llmsFormat.links > 0 ? "pass" : "warn",
-  !llmsOk ? `/llms.txt 없음 (HTTP ${llmsRes.status})` : `H1 ${llmsFormat.h1 ? "있음" : "없음"}, 요약(blockquote) ${llmsFormat.quote ? "있음" : "없음"}, 링크 ${llmsFormat.links}개`,
+  (!llmsOk ? `/llms.txt 없음 (HTTP ${llmsRes.status})` : `H1 ${llmsFormat.h1 ? "있음" : "없음"}, 요약(blockquote) ${llmsFormat.quote ? "있음" : "없음"}, 링크 ${llmsFormat.links}개`) + `. /llms-full.txt ${llmsFullOk ? "있음" : "없음"}(점수 미반영)`,
   !llmsOk ? "선택 사항입니다. 사이트 루트에 llms.txt(마크다운: H1 제목, ‘>’ 요약, ‘## 섹션’ 아래 ‘- [문서](URL): 설명’ 목록)를 두면 LLM 에이전트가 핵심 문서를 찾기 쉬워집니다." : llmsFormat.h1 && llmsFormat.quote ? "" : "llmstxt.org 형식에 맞춰 첫 줄 H1 과 blockquote 요약을 넣으세요.",
   !llmsOk ? "없음" : llmsFormat.h1 && llmsFormat.quote && llmsFormat.links > 0 ? "형식 충족" : "형식 미달");
 add(S.crawl, "ai-txt", "ai.txt (실험적 제안)", 1, "info", aiTxtOk ? "/ai.txt 존재" : "/ai.txt 없음", "표준이 아니므로 점수에 넣지 않습니다. AI 사용 정책을 문장으로 밝히고 싶을 때만 추가하세요.", aiTxtOk ? "있음" : "없음");
+if (cfManaged) add(S.crawl, "cf-managed", "Cloudflare 관리형 robots.txt 적용 중", 1, "info",
+  `robots.txt 응답에 Cloudflare 관리 블록이 있음${blockedTraining.length ? `. 학습용 차단: ${blockedTraining.map((b) => b.token).join(", ")}` : ""}`,
+  "Cloudflare 가 서버의 robots.txt 앞에 학습용 봇(GPTBot, ClaudeBot, Google-Extended 등) 차단 규칙을 붙이고 있습니다. 서버 파일에는 보이지 않아 운영자가 모르는 경우가 많습니다. 의도한 정책이 아니면 Cloudflare 대시보드의 AI 크롤러 · robots.txt 관리 설정을 끄세요. 검색 · 인용용 봇은 이 블록과 무관합니다.",
+  "적용 중");
+add(S.crawl, "content-signal", "Content-Signal 선언 (AI 사용 선호)", 1, "info",
+  contentSignals.length ? contentSignals.map((s) => `Content-Signal: ${s}`).join(" / ") : "robots.txt 에 Content-Signal 없음",
+  contentSignals.some((s) => /search\s*=\s*no/i.test(s)) ? "search=no 는 검색 결과 노출 용도의 사용도 거부한다는 뜻입니다. 의도한 정책인지 확인하세요." : contentSignals.length ? "" : "선택 사항입니다. robots.txt 에 ‘Content-Signal: search=yes, ai-input=yes, ai-train=no’ 처럼 검색 · AI 답변 입력 · 학습 사용 여부를 밝힐 수 있습니다(contentsignals.org, 초안 단계).",
+  contentSignals.length ? "있음" : "없음");
+add(S.crawl, "md-negotiation", "Markdown 응답 (Accept: text/markdown)", 1, "info",
+  mdRes.status ? `Accept: text/markdown 요청에 HTTP ${mdRes.status}, Content-Type ${mdRes.headers["content-type"] || "없음"}` : `요청 실패 (${mdRes.error || "알 수 없음"})`,
+  mdOk ? "" : "선택 사항입니다. 일부 AI 에이전트는 Accept: text/markdown 으로 요청해 HTML 대신 정리된 마크다운을 받습니다(Cloudflare ‘Markdown for Agents’ 등). 지원하지 않아도 감점은 없습니다.",
+  mdOk ? "지원" : "미지원");
 
 // 2. 구조화 데이터
 const PAGE_TYPES = /Article|BlogPosting|WebPage|AboutPage|ContactPage|CollectionPage|Product|Service|Event|Recipe|Course|SoftwareApplication|JobPosting|FAQPage|HowTo|QAPage/;
-add(S.schema, "ld-present", "JSON-LD 구조화 데이터 존재 · 파싱 성공", 3,
-  ldBlocks.length === 0 ? (microdata ? "warn" : "fail") : ldErrors.length ? "warn" : "pass",
-  ldBlocks.length === 0 ? (microdata ? `JSON-LD 없음, Microdata/RDFa 요소 ${microdata}개` : "구조화 데이터 없음") : `타입: ${ldTypes.join(", ") || "없음"}${ldErrors.length ? `. 파싱 오류 ${ldErrors.length}건` : ""}`,
-  ldBlocks.length === 0 ? "Google 권장 형식인 JSON-LD 로 페이지 유형(Article, WebPage 등)과 운영 주체(Organization)를 선언하세요." : ldErrors.length ? "JSON 문법 오류가 있는 블록은 전체가 무시됩니다. 리치 결과 테스트로 검증하세요." : "",
-  ldBlocks.length ? `${ldBlocks.length}개 블록${ldErrors.length ? `, 오류 ${ldErrors.length}` : ""}` : microdata ? "Microdata 만" : "없음");
+{
+  // 원본 HTML 에 없고 JS 실행 후에만 생기는 JSON-LD: Google 은 읽지만 대부분의 AI 크롤러는 못 읽는다.
+  const jsOnly = ldBlocks.length === 0 && rendered.ldCount > 0;
+  add(S.schema, "ld-present", "JSON-LD 구조화 데이터 존재 · 파싱 성공", 3,
+    ldBlocks.length === 0 ? (microdata || jsOnly ? "warn" : "fail") : ldErrors.length ? "warn" : "pass",
+    ldBlocks.length === 0 ? (jsOnly ? `원본 HTML 에는 없고 JavaScript 실행 후 ${rendered.ldCount}개 블록이 생김` : microdata ? `JSON-LD 없음, Microdata/RDFa 요소 ${microdata}개` : "구조화 데이터 없음") : `타입: ${ldTypes.join(", ") || "없음"}${ldErrors.length ? `. 파싱 오류 ${ldErrors.length}건` : ""}`,
+    jsOnly ? "Google 은 렌더링 후 읽지만 처리가 늦어질 수 있고, 대부분의 AI 크롤러는 JavaScript 를 실행하지 않아 이 마크업을 보지 못합니다. JSON-LD 를 서버가 보내는 HTML 에 직접 넣으세요." : ldBlocks.length === 0 ? "Google 권장 형식인 JSON-LD 로 페이지 유형(Article, WebPage 등)과 운영 주체(Organization)를 선언하세요." : ldErrors.length ? "JSON 문법 오류가 있는 블록은 전체가 무시됩니다. 리치 결과 테스트로 검증하세요." : "",
+    ldBlocks.length ? `${ldBlocks.length}개 블록${ldErrors.length ? `, 오류 ${ldErrors.length}` : ""}` : jsOnly ? "JS 로만 주입" : microdata ? "Microdata 만" : "없음");
+}
 add(S.schema, "ld-valid", "@context · @type 유효", 2,
   ldNodes.length === 0 ? "na" : ldBlocks.every((b) => /schema\.org/i.test(b)) && ldNodes.every((n) => n["@type"]) ? "pass" : "warn",
   ldNodes.length === 0 ? "구조화 데이터 없음" : `노드 ${ldNodes.length}개`,
@@ -617,6 +655,9 @@ add(S.schema, "ld-entity", "운영 주체 엔티티 (Organization/Person + sameA
     "Google 은 구조화 데이터가 화면에 보이는 텍스트와 일치해야 한다고 명시합니다. 보이지 않는 내용은 마크업에서 제거하세요.",
     st === "na" ? "비교 대상 없음" : st === "warn" ? "불일치" : "일치");
   if (faq.length) add(S.schema, "faq-note", "FAQPage 스키마 사용 중", 1, "info", `Question ${faq.length}개`, "2023-08 이후 FAQ 리치 결과는 정부 · 의료 사이트로 제한되었습니다. 유지해도 무해하지만 노출 효과를 기대하지 마세요.", `${faq.length}개`);
+  const retired = ldTypes.filter((t) => /^(HowTo|SpecialAnnouncement)$/.test(t));
+  if (retired.length) add(S.schema, "retired-schema", "리치 결과가 중단된 스키마 사용 중", 1, "info", retired.join(", "),
+    "HowTo 리치 결과는 2023-09 에 중단되었고 SpecialAnnouncement 는 지원이 끝났습니다. 남겨 둬도 감점은 없지만 노출 효과는 없습니다.", retired.join(", "));
 }
 
 const thin = words < 300;
@@ -677,6 +718,16 @@ add(S.evidence, "author", "저자 표기", 2,
   authorName ? `저자: ${authorName}` : "바이라인, meta author, schema author 모두 없음",
   "바이라인과 Article.author(Person: name, url, sameAs)로 누가 썼는지 밝히세요. E-E-A-T 의 기본 신호입니다.",
   authorName || "없음");
+{
+  // 저자 Person 상세: 이름 문자열만 있는지, Person 객체에 직함 · 소개 URL · sameAs 가 있는지. 점수 미반영.
+  const a = [].concat(ldNodes.find((n) => n.author)?.author ?? [])[0];
+  const isPerson = a && typeof a === "object" && /Person/.test([].concat(a["@type"] || "").join("/"));
+  const has = (k) => isPerson && a[k] && [].concat(a[k]).length > 0;
+  add(S.evidence, "ld-author", "저자 Person 스키마 상세", 1, "info",
+    !a ? "schema author 없음" : !isPerson ? `author 가 ${typeof a === "string" ? "이름 문자열" : `${[].concat(a["@type"] || "타입 없음").join("/")} 객체`}` : `Person: jobTitle ${has("jobTitle") ? "있음" : "없음"}, url ${has("url") ? "있음" : "없음"}, sameAs ${has("sameAs") ? `${[].concat(a.sameAs).length}개` : "없음"}`,
+    isPerson && has("jobTitle") && has("url") && has("sameAs") ? "" : "Article.author 를 Person 객체로 두고 name, jobTitle(직함), url(저자 소개 페이지), sameAs(저자의 SNS · 프로필)를 넣으면 누가 썼는지 기계가 확인할 수 있습니다. 점수에는 넣지 않습니다.",
+    !a ? "없음" : !isPerson ? "이름만" : [has("jobTitle") && "직함", has("url") && "소개 URL", has("sameAs") && "sameAs"].filter(Boolean).join(", ") || "이름만");
+}
 add(S.evidence, "dates", "게시일 · 갱신일 표기", 2,
   latestDate ? "pass" : "fail",
   latestDate ? "schema, meta, time 요소 기준 가장 최근 날짜" : "datePublished, dateModified, time[datetime] 없음",
@@ -843,10 +894,30 @@ if (hreflangs.length) {
 } else add(S.meta, "hreflang", "hreflang", 1, "na", "다국어 선언 없음(단일 언어 사이트면 정상)", "", "선언 없음");
 
 // 6. 기술 기본 · 페이지 경험
-add(S.tech, "https", "HTTPS", 3, finalUrl.protocol === "https:" ? "pass" : "fail",
-  page.headers["strict-transport-security"] ? "HSTS 헤더 적용" : "HSTS 헤더 없음",
-  finalUrl.protocol === "https:" ? "" : "모든 페이지를 HTTPS 로 제공하고 HTTP 는 301 로 보내세요.",
-  finalUrl.protocol.replace(":", "").toUpperCase());
+{
+  const isHttps = finalUrl.protocol === "https:";
+  // HTTP 주소가 200 으로 그대로 열리면 같은 내용의 주소가 두 벌이 된다.
+  const httpServes = isHttps && httpRes && !(httpRes.status >= 300 && httpRes.status < 400 && /^https:/i.test(new URL(httpRes.location || "/", `http://${finalUrl.host}`).href));
+  add(S.tech, "https", "HTTPS · HTTP 리다이렉트", 3, !isHttps ? "fail" : httpServes ? "warn" : "pass",
+    !isHttps ? "HTTP 로 제공" : !httpRes ? "HTTP(80) 접속 불가, HTTPS 만 제공" : httpServes ? `http:// 주소가 HTTP ${httpRes.status}${httpRes.location ? ` → ${httpRes.location}` : ""} 로 응답(HTTPS 로 보내지 않음)` : `http:// 주소가 ${httpRes.status} 로 HTTPS 로 이동`,
+    !isHttps ? "모든 페이지를 HTTPS 로 제공하고 HTTP 는 301 로 보내세요." : httpServes ? "HTTP 주소를 301 로 HTTPS 주소에 보내세요. 그대로 열리면 같은 내용의 주소가 두 벌 색인될 수 있습니다." : "",
+    !isHttps ? "HTTP" : httpServes ? "HTTP 그대로 열림" : "HTTPS");
+}
+{
+  const h = page.headers;
+  const list = [
+    ["HSTS", !!h["strict-transport-security"]],
+    ["CSP", !!h["content-security-policy"]],
+    ["X-Content-Type-Options", /nosniff/i.test(h["x-content-type-options"] || "")],
+    ["X-Frame-Options", !!h["x-frame-options"] || /frame-ancestors/i.test(h["content-security-policy"] || "")],
+    ["Referrer-Policy", !!h["referrer-policy"]],
+  ];
+  const on = list.filter(([, v]) => v).length;
+  add(S.tech, "security-headers", "보안 헤더", 1, "info",
+    list.map(([k, v]) => `${k} ${v ? "있음" : "없음"}`).join(", "),
+    on === list.length ? "" : "검색 순위 요인은 아니라 점수에 넣지 않습니다. 사이트 보안을 위해 빠진 헤더를 웹 서버 · CDN 설정에 추가하는 것을 권합니다.",
+    `${on}/${list.length}`);
+}
 {
   const why = { UNABLE_TO_VERIFY_LEAF_SIGNATURE: ["중간 인증서 누락", "서버가 중간 인증서(intermediate)를 보내지 않아 공개 루트 저장소만으로는 검증 불가"], CERT_HAS_EXPIRED: ["만료", "인증서 만료"], ERR_TLS_CERT_ALTNAME_INVALID: ["도메인 불일치", "인증서 도메인 불일치"], DEPTH_ZERO_SELF_SIGNED_CERT: ["자체 서명", "자체 서명 인증서"], SELF_SIGNED_CERT_IN_CHAIN: ["자체 서명", "체인에 자체 서명 인증서 포함"], UNABLE_TO_GET_ISSUER_CERT_LOCALLY: ["발급자 불명", "발급자 인증서를 찾을 수 없음"] };
   const w = tlsRes && !tlsRes.ok ? why[tlsRes.code] || ["검증 실패", tlsRes.message] : null;
@@ -911,6 +982,253 @@ add(S.tech, "internal-links", "내부 링크 · 앵커 텍스트", 2,
     !m ? "측정 안 됨" : `${good}/3 좋음`);
 }
 
+// 참고: 추가 스키마. Google 지원 상태만 알리고 점수에 넣지 않는다.
+{
+  const speak = ldNodes.some((n) => n.speakable);
+  const search = ldNodes.some((n) => [].concat(n.potentialAction || []).some((p) => /SearchAction/.test([].concat(p?.["@type"] || "").join())));
+  const crumb = ldTypes.some((t) => /BreadcrumbList/.test(t));
+  add(S.schema, "ld-extra", "추가 스키마 (BreadcrumbList · SearchAction · speakable)", 1, "info",
+    `BreadcrumbList ${crumb ? "있음" : "없음"}, WebSite SearchAction ${search ? "있음" : "없음"}, speakable ${speak ? "있음" : "없음"}`,
+    "BreadcrumbList 는 검색 결과의 경로 표시 리치 결과로 지원됩니다. SearchAction 은 Google 이 2024-11 사이트링크 검색창을 없애 효과가 없고, speakable 은 미국 영어 뉴스 대상 베타 기능입니다. Google 은 AI 기능용 별도 스키마가 필요 없다고 밝혔으므로 점수에 넣지 않습니다.",
+    [crumb && "Breadcrumb", search && "SearchAction", speak && "speakable"].filter(Boolean).join(", ") || "없음");
+}
+
+// ---------- 참고: 브랜드명 · 공식 채널 ----------
+const brandName = (() => {
+  const org = ldNodes.find((n) => /Organization|Corporation|LocalBusiness|Brand/.test(typeOf(n)) && typeof n.name === "string" && n.name.trim());
+  if (org) return norm(org.name);
+  if (og("og:site_name")) return og("og:site_name");
+  const parts = title.split(/\s+[|\-–—:·]\s+|\s*\|\s*/).map(norm).filter(Boolean);
+  return (HOME ? parts[0] : parts[parts.length - 1]) || host.split(".")[0];
+})();
+const CHANNELS = [
+  ["네이버 블로그", /(^|\.)blog\.naver\.com$/], ["네이버 포스트", /(^|\.)post\.naver\.com$/], ["네이버 스마트스토어", /(^|\.)smartstore\.naver\.com$/],
+  ["네이버 플레이스 · 지도", /(^|\.)(map|place|m\.place|pcmap\.place)\.naver\.com$|^naver\.me$/], ["네이버 카페", /(^|\.)cafe\.naver\.com$/], ["네이버 TV", /(^|\.)tv\.naver\.com$/],
+  ["카카오톡 채널", /^pf\.kakao\.com$/], ["브런치", /(^|\.)brunch\.co\.kr$/], ["다음 카페", /^cafe\.daum\.net$/], ["티스토리", /(^|\.)tistory\.com$/],
+  ["나무위키", /^namu\.wiki$/], ["위키백과", /(^|\.)wikipedia\.org$/], ["Wikidata", /(^|\.)wikidata\.org$/],
+  ["YouTube", /(^|\.)youtube\.com$|^youtu\.be$/], ["Instagram", /(^|\.)instagram\.com$/], ["Facebook", /(^|\.)facebook\.com$/], ["X(Twitter)", /(^|\.)(x|twitter)\.com$/],
+  ["LinkedIn", /(^|\.)linkedin\.com$/], ["TikTok", /(^|\.)tiktok\.com$/], ["Threads", /(^|\.)threads\.(net|com)$/], ["GitHub", /^github\.com$/],
+];
+const channels = [];
+{
+  // 공유 버튼(sharer · intent 등)은 공식 채널이 아니다.
+  const channelOf = (href) => {
+    const u = toAbs(href);
+    if (!u || /share|sharer|intent\/|shareArticle/i.test(u.pathname + u.search)) return null;
+    const c = CHANNELS.find(([, re]) => re.test(u.hostname.replace(/^www\./, "")));
+    return c ? { platform: c[0], url: u.href } : null;
+  };
+  const sameAsUrls = entityNodes.flatMap((n) => [].concat(n.sameAs || [])).filter((x) => typeof x === "string");
+  for (const [source, list] of [["sameAs", sameAsUrls], ["페이지 링크", anchors.map((a) => a.href)]])
+    for (const h of list) { const c = channelOf(h); if (c && !channels.some((x) => x.platform === c.platform)) channels.push({ ...c, source }); }
+}
+
+// ---------- 참고: 문단 인용 가능성 (geo-seo-claude citability_scorer.py 의 한국어 환산판) ----------
+// shortcut: 단어 수는 기존 wordCount(한글 2자≈1어절) 근사, 고유명사는 영문 대문자 단어와 브랜드명만 센다. 정밀하게 보려면 형태소 분석기로 교체.
+const PRONOUN_RE = /(?<![가-힣])(이것|그것|저것|이는|그는|그녀|이들|그들|이러한|그러한|이런|그런|해당|앞서|위의|이|그|저)(?=\s)|\b(it|they|them|their|this|that|these|those|he|she|his|her)\b/gi;
+function scorePassage(text, heading, parts) {
+  const w = wordCount(text), ss = sentences(text), sw = ss.map(wordCount);
+  // 1. 즉답 품질 (30)
+  let a = 0;
+  if (ss.some((s) => definitionRes.some((re) => re.test(s)))) a += 15;
+  if (/\d+(\.\d+)?\s?%|\$\d|\d[\d,]*\s?(만|억|조)?\s?(원|달러|명|배|건)/.test(ss.slice(0, 2).join(" ")) || definitionRes.some((re) => re.test(ss[0] || ""))) a += 15;
+  if (heading && (Q_KO.test(heading) || Q_EN.test(heading))) a += 10;
+  if (ss.length) a += Math.floor((sw.filter((n) => n >= 5 && n <= 25).length / ss.length) * 10);
+  if (sourceRe.test(text)) a += 10;
+  // 2. 자기완결성 (25)
+  let c = w >= 134 && w <= 167 ? 10 : w >= 100 && w <= 200 ? 7 : w >= 80 && w <= 250 ? 4 : w < 30 || w > 400 ? 0 : 2;
+  const pr = (text.match(PRONOUN_RE) || []).length / Math.max(w, 1);
+  c += pr < 0.02 ? 8 : pr < 0.04 ? 5 : pr < 0.06 ? 3 : 0;
+  const proper = (text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || []).length + (brandName ? text.split(brandName).length - 1 : 0);
+  c += proper >= 3 ? 7 : proper >= 1 ? 4 : 0;
+  // 3. 읽기 구조 (20)
+  let r = 0;
+  if (ss.length) { const avg = w / ss.length; r += avg >= 10 && avg <= 20 ? 8 : avg >= 8 && avg <= 25 ? 5 : 2; }
+  if (/(first|second|third|finally|additionally|moreover|furthermore|첫째|둘째|셋째|먼저|다음으로|마지막으로|또한|게다가)/i.test(text)) r += 4;
+  if (/\d+[.)]\s|\b(step|tip|point)\s+\d+|\d+\s*단계|단계\s*\d+/i.test(text)) r += 4;
+  if (parts > 1) r += 4;
+  // 4. 수치 밀도 (15)
+  let d = Math.min((text.match(/\d+(?:\.\d+)?\s?(%|퍼센트)/g) || []).length * 3, 6);
+  d += Math.min((text.match(/\$[\d,]+(?:\.\d+)?|[\d,]+(?:\.\d+)?\s?(?:만|억|조)?\s?(?:원|달러)/g) || []).length * 3, 5);
+  d += Math.min((text.match(/\d+(?:,\d{3})*(?:\.\d+)?\s?(?:명|개사|개|건|곳|배|회|users|customers|pages|sites|companies|businesses|people|percent|times)(?![A-Za-z])/gi) || []).length * 2, 4);
+  if (/(?<!\d)20[12]\d(?!\d)/.test(text)) d += 2;
+  for (const re of [/(according to|per|from|by)\s+[A-Z]/, /(에\s*따르면|에\s*의하면)/, /(Gartner|Forrester|McKinsey|Harvard|Stanford|MIT|Google|Microsoft|OpenAI|Anthropic|통계청|한국은행|과학기술정보통신부|한국인터넷진흥원|KISA)/, /\([A-Z가-힣][^()]{0,30}\d{4}\)/])
+    if (re.test(text)) d += 2;
+  // 5. 고유성 (10)
+  let u = 0;
+  if (/(our (research|study|data|analysis|survey|findings)|we (found|discovered|analyzed|surveyed|measured)|자체\s*(조사|분석|데이터|연구|측정)|직접\s*(측정|테스트|분석|조사)|저희가|당사가?\s*(조사|분석))/i.test(text)) u += 5;
+  if (/(case study|for example|for instance|in practice|real-world|hands-on|사례|예를 들어|예컨대|실제로|실무에서)/i.test(text)) u += 3;
+  if (/(using|with|via|through)\s+[A-Z][a-z]+|[A-Z][A-Za-z0-9]+\s?(을|를|으로|로)\s?(사용|활용|이용)/.test(text)) u += 2;
+  const p = { answer: Math.min(a, 30), self: Math.min(c, 25), structure: Math.min(r, 20), stats: Math.min(d, 15), unique: Math.min(u, 10) };
+  return { heading, words: w, score: Object.values(p).reduce((x, y) => x + y, 0), parts: p, preview: text.length > 90 ? text.slice(0, 90) + "…" : text };
+}
+const passages = [];
+{
+  // 소제목 하나와 그 아래 문단 · 목록 · 표를 한 조각으로. 5어절 미만 요소는 빼고, 20어절 미만 조각은 채점하지 않는다.
+  let head = "(첫 소제목 이전)", buf = [];
+  const flush = () => { const t = buf.join(" "); if (buf.length && wordCount(t) >= 20) passages.push(scorePassage(t, head, buf.length)); };
+  for (const b of blocks) {
+    if (/^h[1-6]$/.test(b.tag)) { flush(); head = b.text; buf = []; }
+    else if (b.text && wordCount(b.text) >= 5) buf.push(b.text);
+  }
+  flush();
+}
+const citability = (() => {
+  if (!passages.length) return { score: null, count: 0, optimal: 0, passages: [] };
+  const top = [...passages].sort((x, y) => y.score - x.score).slice(0, 5);
+  return { score: Math.round(top.reduce((s, p) => s + p.score, 0) / top.length), count: passages.length, optimal: passages.filter((p) => p.words >= 134 && p.words <= 167).length, passages };
+})();
+
+// ---------- 참고: 위키 · Wikidata 조회, llms.txt 초안 ----------
+// 외부 API 에는 도구 이름만 보낸다.
+const API_UA = `seo-aeo-geo-audit/${VERSION}`;
+const getJson = (u) => fetch(u, { headers: { "user-agent": API_UA }, signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+async function wikiLookup(lang) {
+  const j = await getJson(`https://${lang}.wikipedia.org/w/api.php?action=query&format=json&redirects=1&prop=pageprops&titles=${encodeURIComponent(brandName)}`);
+  if (!j) return { checked: false };
+  const p = Object.values(j.query?.pages || {})[0];
+  if (!p || "missing" in p || "invalid" in p) return { checked: true, found: false };
+  if (p.pageprops && "disambiguation" in p.pageprops) return { checked: true, found: false, note: `“${p.title}” 은 동음이의 문서` };
+  return { checked: true, found: true, title: p.title, url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(p.title.replace(/ /g, "_"))}` };
+}
+async function wikidataLookup() {
+  const j = await getJson(`https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&type=item&limit=5&language=ko&uselang=ko&search=${encodeURIComponent(brandName)}`);
+  if (!j) return { checked: false };
+  const hit = (j.search || []).find((s) => norm(s.match?.text || s.label).toLowerCase() === brandName.toLowerCase());
+  return hit ? { checked: true, found: true, id: hit.id, description: hit.description || "", url: hit.concepturi } : { checked: true, found: false };
+}
+async function buildLlmsDraft() {
+  if (llmsOk) return null;
+  const locs = (xml) => [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, "&"));
+  let xml = sitemapXml;
+  if (/<sitemapindex/i.test(xml)) {
+    const subs = locs(xml);
+    const pick = subs.find((u) => /page/i.test(u)) || subs.find((u) => /post/i.test(u)) || subs[0];
+    xml = pick ? (await fetchFollow(pick, { timeout: 15000 })).text || "" : "";
+  }
+  const sameHost = (u) => { try { return new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; } };
+  // 계정 · 결제 같은 기능 페이지는 LLM 에게 안내할 문서가 아니다.
+  const utility = /\/(log-?in|log-?out|sign-?(in|up)|join|register|modify|my-?(account|page)|cart|checkout|wp-[a-z]+)(\/|$)/i;
+  const urls = [...new Set([origin + "/", ...locs(xml)])].filter((u) => sameHost(u) && !utility.test(new URL(u).pathname)).slice(0, 20);
+  const got = [];
+  for (let i = 0; i < urls.length; i += 5)
+    got.push(...(await Promise.all(urls.slice(i, i + 5).map(async (u) => {
+      const r = await fetchFollow(u, { timeout: 10000 });
+      if (!r.ok) return null;
+      const d = load(r.text);
+      // 제목 끝의 “ | 브랜드명” 은 목록에서 반복되므로 뗀다.
+      const t = norm(d("title").first().text()), cut = t.replace(/\s*[|\-–—·]\s*[^|\-–—·]+$/, "");
+      return { url: r.url, title: cut && t.endsWith(brandName) ? cut : t, desc: norm(d('meta[name="description"]').attr("content")) };
+    }))));
+  const ok = got.filter((p) => p?.title);
+  if (!ok.length) return null;
+  const groups = {};
+  for (const p of ok) {
+    // 하위 경로가 있는 주소만 첫 경로로 묶는다. /글-슬러그/ 같은 한 단계 주소는 모두 “주요 페이지”.
+    const segs = new URL(p.url).pathname.split("/").filter(Boolean);
+    let g = "주요 페이지";
+    try { if (segs.length > 1) g = decodeURIComponent(segs[0]); } catch { g = segs[0]; }
+    (groups[g] ||= []).push(p);
+  }
+  const home = ok.find((p) => new URL(p.url).pathname === "/") || ok[0];
+  return [`# ${brandName}`, "", `> ${home.desc || "<사이트를 한두 문장으로 소개하세요>"}`, "",
+    ...Object.entries(groups).flatMap(([g, list]) => [`## ${g}`, "", ...list.map((p) => `- [${p.title.replace(/[[\]]/g, "")}](${p.url})${p.desc ? `: ${p.desc}` : ""}`), ""])].join("\n");
+}
+// 네이버 · 나무위키는 실제 브라우저(Chrome)로 열어 사람이 보는 화면 그대로 기록한다. 채점은 Claude 가 이 기록으로 한다(reference/ai-review.md).
+// 방식은 kuma/collector-poc/scripts/naver-search.mjs 와 같다: 한국어 · 서울 시간대 · 일반 데스크톱 UA, DOM 로드 뒤 1.5초 대기, 탭별로 브랜드 키워드가 든 링크만 추림.
+const PORTAL_HOST = /(^|\.)(naver\.(com|net)|pstatic\.net|daum\.(net|co\.kr)|kakao(cdn)?\.(com|net)|namu\.(wiki|la|moe))$/;
+// 브랜드 키워드: 전체 이름, 첫 단어(“반얀트리 부산 해운대” → “반얀트리”), 도메인 이름(uxis)
+const brandKeys = [...new Set([brandName, brandName.split(/\s+/)[0], host.split(".")[0]].filter((k) => k && k.length >= 2))];
+const BRAND_KEY = brandKeys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+async function browse(url) {
+  if (!browser) return { ok: false, url, error: "Chrome 없음" };
+  const p = await browser.newPage();
+  try {
+    await p.setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+    await p.setExtraHTTPHeaders({ "accept-language": "ko-KR,ko;q=0.9" });
+    await p.emulateTimezone("Asia/Seoul");
+    const res = await p.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await new Promise((ok) => setTimeout(ok, 1500));
+    const snap = await p.evaluate((host, portal, keySrc) => {
+      const t = (s) => (s || "").replace(/\s+/g, " ").trim();
+      const re = new RegExp(portal), key = new RegExp(keySrc, "i");
+      const anchors = [...document.querySelectorAll("a[href^='http']")];
+      // 포털 자체 도메인을 뺀 외부 도메인을 화면 순서대로 모아, 공식 사이트가 몇 번째인지 본다.
+      const ext = [...new Set(anchors.map((a) => { try { return new URL(a.href).hostname.replace(/^www\./, ""); } catch { return ""; } }).filter((h) => h && !re.test(h)))];
+      const at = ext.findIndex((h) => h === host || h.endsWith("." + host));
+      // 브랜드 키워드가 제목에 든 결과 링크와 그 묶음의 문맥(광고 · 검색 · 로그인 링크 제외)
+      const seen = new Set(), items = [];
+      for (const a of anchors) {
+        const title = t(a.innerText).replace(/\s*새 창 열림/g, "");
+        if (title.length < 6 || !key.test(title) || seen.has(a.href) || /search\.naver|help\.naver|nid\.naver|ader\.naver|search\.daum|accounts\.kakao/.test(a.href)) continue;
+        seen.add(a.href);
+        // 결과 하나만 담은 묶음: 링크에서 위로 올라가며 글자 수가 400 을 넘기 직전 요소까지
+        let box = a;
+        while (box.parentElement && t(box.parentElement.innerText).length <= 400) box = box.parentElement;
+        items.push({ title: title.slice(0, 160), href: a.href, context: t(box.innerText).replace(/\s*새 창 열림/g, "").slice(0, 300) });
+        if (items.length >= 15) break;
+      }
+      return {
+        title: t(document.title),
+        headings: [...new Set([...document.querySelectorAll("h2, h3")].map((e) => t(e.innerText)).filter((s) => s && s.length <= 40))].slice(0, 30),
+        // 통합 검색은 기업 정보 패널까지 보이게 길게 남긴다.
+        officialRank: at < 0 ? null : at + 1, items, text: t(document.body?.innerText).slice(0, /[?&]query=/.test(location.search) && !/where=|ssc=/.test(location.search) ? 8000 : 3000),
+      };
+    }, host, PORTAL_HOST.source, BRAND_KEY);
+    const status = res?.status() ?? 0;
+    const blocked = /just a moment|attention required|자동입력 방지|비정상적인 (접근|검색)/i.test(snap.title + " " + snap.text.slice(0, 500));
+    return { ok: status > 0 && status < 500 && !blocked, status, url, blocked, ...snap };
+  } catch (e) {
+    return { ok: false, url, error: e.message };
+  } finally {
+    await p.close().catch(() => {});
+  }
+}
+const PORTAL_TABS = {
+  naver: {
+    total: (q) => `https://search.naver.com/search.naver?query=${q}`,
+    news: (q) => `https://search.naver.com/search.naver?where=news&sort=1&query=${q}`,
+    blog: (q) => `https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&nso=so:dd,p:all&query=${q}`,
+    cafe: (q) => `https://search.naver.com/search.naver?ssc=tab.cafe.all&sm=tab_jum&nso=so:dd,p:all&query=${q}`,
+  },
+};
+console.error("▶ 위키 · Wikidata 조회, llms.txt 초안, 네이버 · 나무위키 화면 확인 중…");
+const [wikiKo, wikiEn, wikidata, llmsDraft] = await Promise.all([wikiLookup("ko"), wikiLookup("en"), wikidataLookup(), buildLlmsDraft()]);
+// 포털에는 한 번에 하나씩, 사이에 잠깐 쉬며 연다.
+const search = { keys: brandKeys };
+for (const [portal, tabs] of Object.entries(PORTAL_TABS)) {
+  search[portal] = {};
+  for (const [tab, url] of Object.entries(tabs)) {
+    search[portal][tab] = await browse(url(encodeURIComponent(brandName)));
+    await new Promise((ok) => setTimeout(ok, 1200));
+  }
+}
+search.namu = await browse(`https://namu.wiki/w/${encodeURIComponent(brandName)}`);
+search.namu.found = search.namu.ok ? search.namu.status === 200 : null; // 404 면 문서 없음
+const brand = { name: brandName, wikipedia: { ko: wikiKo, en: wikiEn }, wikidata, channels, search };
+// Claude 의 플랫폼 평가(네이버 AI 브리핑)에 쓰는 네이버 검색 봇 robots.txt 판정. 점수 미반영.
+const koBots = ["Yeti"].map((token) => ({ token, ...robotsAllows(robots, token, finalUrl.pathname) }));
+
+// ---------- 참고: JSON-LD 예시 (페이지에서 읽은 값으로 채우고 모르는 값은 <빈칸>) ----------
+const jsonld = (() => {
+  const id = origin + "/#organization";
+  const orgLogo = ldNodes.find((n) => /Organization/.test(typeOf(n)) && n.logo)?.logo;
+  const org = {
+    "@context": "https://schema.org", "@type": "Organization", "@id": id, name: brandName, url: origin + "/",
+    logo: (typeof orgLogo === "string" ? orgLogo : orgLogo?.url) || "<로고 이미지 URL>",
+    sameAs: channels.length ? channels.map((c) => c.url) : ["<공식 SNS · 네이버 블로그 · 위키 문서 URL>"],
+  };
+  if (HOME) return [org, { "@context": "https://schema.org", "@type": "WebSite", name: brandName, url: origin + "/", publisher: { "@id": id } }];
+  const pick = (k, ogKey) => ldNodes.find((n) => n[k])?.[k] || og(ogKey);
+  return [{
+    "@context": "https://schema.org", "@type": "Article", headline: h1s[0]?.text || title, description: descs[0] || "<글 요약 한두 문장>",
+    image: og("og:image") || "<대표 이미지 URL>", datePublished: pick("datePublished", "article:published_time") || "<게시일 YYYY-MM-DD>",
+    dateModified: pick("dateModified", "article:modified_time") || "<수정일 YYYY-MM-DD>",
+    author: { "@type": "Person", name: authorName || "<저자 이름>", jobTitle: "<직함>", url: "<저자 소개 페이지 URL>", sameAs: ["<저자 SNS · 프로필 URL>"] },
+    publisher: { "@id": id }, mainEntityOfPage: page.url,
+  }, org];
+})();
+
 // ---------- 점수 ----------
 const scoreOf = (list) => {
   const s = list.filter((c) => c.score !== null);
@@ -934,7 +1252,8 @@ const result = {
   tool: "seo-aeo-geo-audit", version: VERSION, url: opts.url, finalUrl: page.url, host, auditedAt: localIso(startedAt),
   formFactor: opts.desktop ? "desktop" : "mobile", pageType, pageTypeInfo: { ...detected, source: opts.pageType ? "지정" : "자동" }, overall, categories, sections, topFixes, checks, notes, lighthouse: lh,
   bots: bots.map(({ probeUa, ...b }) => b),
-  facts: { title, description: descs[0] || "", canonical: canonicals[0] || "", h1: h1s.map((h) => h.text), words, headings: allHeadings.length, lists, tables, images: imgs.length, internalLinks: internal.length, externalHosts: [...contentExternalHosts], ldTypes, author: authorName, latestDate: latestDate?.toISOString() || null, llmsTxt: llmsOk, aiTxt: aiTxtOk, sitemap: sitemapUrl },
+  citability, brand, jsonld, review: null,
+  facts: { koBots, contentSignals, cfManaged, markdown: mdOk, llmsFullTxt: llmsFullOk, title, description: descs[0] || "", canonical: canonicals[0] || "", h1: h1s.map((h) => h.text), words, headings: allHeadings.length, lists, tables, images: imgs.length, internalLinks: internal.length, externalHosts: [...contentExternalHosts], ldTypes, author: authorName, latestDate: latestDate?.toISOString() || null, llmsTxt: llmsOk, aiTxt: aiTxtOk, sitemap: sitemapUrl },
 };
 
 // ---------- 출력 ----------
@@ -943,7 +1262,8 @@ const stamp = `${startedAt.getFullYear()}${pad(startedAt.getMonth() + 1)}${pad(s
 const slug = finalUrl.pathname.replace(/[^A-Za-z0-9가-힣]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 const base = path.join(opts.out, `audit-${host}${slug ? "-" + slug : ""}-${stamp}`);
 result.author = opts.author;
-result.files = { json: base + ".json", html: base + ".html", pdf: opts.pdf && browser ? base + ".pdf" : null, pages: null, pdfPages: null, pdfBytes: null };
+result.files = { json: base + ".json", html: base + ".html", pdf: opts.pdf && browser ? base + ".pdf" : null, pages: null, pdfPages: null, pdfBytes: null, llmsDraft: llmsDraft ? base + "-llms-draft.txt" : null };
+if (llmsDraft) await writeFile(result.files.llmsDraft, llmsDraft);
 const countPages = (buf) => (buf.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
 
 // 흐름 HTML 을 브라우저에서 A4 쪽으로 나눈 뒤, 그 DOM 을 HTML 로 저장하고 같은 DOM 을 PDF 로 인쇄한다.
@@ -972,8 +1292,12 @@ console.log(`페이지 유형: ${HOME ? "메인 · 소개" : "콘텐츠(글)"} (
 console.log(`종합 ${overall ?? "–"}  |  ${categories.map(line).join("  |  ")}`);
 if (lh.scores) console.log(`Lighthouse(${lh.formFactor}) 성능 ${lh.scores.performance ?? "–"} · 접근성 ${lh.scores.accessibility ?? "–"} · 권장사항 ${lh.scores["best-practices"] ?? "–"} · SEO ${lh.scores.seo ?? "–"}`);
 sections.forEach((s) => console.log(`  - ${s.name}: ${s.score ?? "–"} (통과 ${s.counts.pass} · 주의 ${s.counts.warn} · 실패 ${s.counts.fail})`));
+console.log(`참고(종합 미포함): 문단 인용 가능성 ${citability.score ?? "–"} (${citability.count}개 문단) · 브랜드 "${brandName}" 위키백과 ko ${wikiKo.found ? "있음" : "없음"} / en ${wikiEn.found ? "있음" : "없음"} · Wikidata ${wikidata.found ? wikidata.id : "없음"} · 공식 채널 ${channels.length}개`);
+const fail = (s) => `확인 불가(${s.error || (s.blocked ? "차단 화면" : `HTTP ${s.status}`)})`;
+const portalLine = (k, p) => `${k} ${!p.total.ok ? fail(p.total) : p.total.officialRank ? `공식 사이트 ${p.total.officialRank}번째` : "공식 사이트 없음"}, ${["news", "blog", "cafe"].map((t) => `${{ news: "뉴스", blog: "블로그", cafe: "카페" }[t]} ${p[t].ok ? `${p[t].items.length}건` : "확인 불가"}`).join(" · ")}`;
+console.log(`브라우저 확인(브랜드 키워드 ${brandKeys.join(", ")}): ${portalLine("네이버", search.naver)} | 나무위키 ${!search.namu.ok ? fail(search.namu) : search.namu.found ? "문서 있음" : "문서 없음"}`);
 console.log("\n우선 개선 과제:");
 topFixes.forEach((c, i) => console.log(`  ${i + 1}. [${c.status === "fail" ? "실패" : "주의"}] ${c.title} — ${c.detail}`));
 notes.forEach((n) => console.log(`  ※ ${n}`));
-console.log(`\n파일:\n  JSON ${result.files.json}\n  HTML ${result.files.html}${result.files.pages ? ` (${result.files.pages}쪽)` : ""}${result.files.pdf ? `\n  PDF  ${result.files.pdf} (${result.files.pdfPages}쪽, ${Math.round(result.files.pdfBytes / 1024)}KB)` : "\n  PDF  생성 안 됨"}`);
+console.log(`\n파일:\n  JSON ${result.files.json}\n  HTML ${result.files.html}${result.files.pages ? ` (${result.files.pages}쪽)` : ""}${result.files.pdf ? `\n  PDF  ${result.files.pdf} (${result.files.pdfPages}쪽, ${Math.round(result.files.pdfBytes / 1024)}KB)` : "\n  PDF  생성 안 됨"}${result.files.llmsDraft ? `\n  llms.txt 초안 ${result.files.llmsDraft}` : ""}`);
 if (result.files.pdf && result.files.pdfPages !== result.files.pages) console.log(`  ! HTML ${result.files.pages}쪽과 PDF ${result.files.pdfPages}쪽이 다릅니다. 쪽 높이를 넘친 블록이 있는지 확인하세요.`);

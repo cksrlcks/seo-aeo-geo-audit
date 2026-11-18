@@ -57,6 +57,7 @@ https://example.com SEO · AEO · GEO 점검해서 보고서 만들어줘
 | `.claude-plugin/` | 플러그인 설정(`plugin.json`, 버전은 여기 한 곳)과 마켓플레이스 설정(`marketplace.json`) |
 | `skills/seo-aeo-geo-audit/SKILL.md` | Claude 가 따르는 절차 · 전달 형식 · 하지 말 것 |
 | `skills/seo-aeo-geo-audit/reference/checks.md` | 점검 항목, 가중치, 통과 기준, 근거 |
+| `skills/seo-aeo-geo-audit/reference/ai-review.md` | Claude 판단 평가(브랜드 언급 · E-E-A-T · AI 플랫폼) 기준표와 `review.json` 형식. 참고 점수라 종합에 넣지 않음 |
 | `skills/seo-aeo-geo-audit/reference/report-style-guide.md` | 보고서 디자인 규칙(색 · 글자 · 간격 · 컴포넌트 · 쪽) |
 | `skills/seo-aeo-geo-audit/scripts/audit.mjs` | 수집 · 채점 · 파일 출력 |
 | `skills/seo-aeo-geo-audit/scripts/report.mjs` | 보고서 구조 · 문구와 A4 쪽 나누기 |

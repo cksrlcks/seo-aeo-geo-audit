@@ -29,10 +29,14 @@
 | robots-ai | 검색 · 인용용 AI 봇 허용 | 3 | 전부 허용 / 절반 이상 / 그 미만 | OpenAI: OAI-SearchBot 차단 시 ChatGPT 검색 미노출. 학습용(GPTBot · ClaudeBot · Google-Extended 등) 차단은 감점 없음 |
 | bot-probe | AI 봇 UA 실제 요청 | 2 | 모두 2xx·3xx / 일부 403·429 / 전부 차단. 5xx · 연결 실패는 2초 뒤 한 번 더 요청한 결과로 판정 | 보안 플러그인 · WAF · CDN 의 봇 차단 규칙이 AI 봇 User-Agent 를 일괄 차단하는 경우가 많다 |
 | ssr | 본문이 원본 HTML 에 포함 | 3 | 원본/렌더링 텍스트 비율 ≥ 70% / ≥ 40% / 미만 | 대부분의 AI 크롤러는 JS 미실행. Google: "중요한 콘텐츠를 텍스트로 제공" |
-| llms-txt | llms.txt | 1 | 존재 + H1 + blockquote + 링크 / 존재하나 형식 미달 / 없음 | llmstxt.org 제안(비공식). Google 은 AI 전용 파일 불필요 명시 → 낮은 가중치 |
+| llms-txt | llms.txt | 1 | 존재 + H1 + blockquote + 링크 / 존재하나 형식 미달 / 없음. /llms-full.txt 유무는 설명에만 적는다 | llmstxt.org 제안(비공식). Google 은 AI 전용 파일 불필요 명시 → 낮은 가중치 |
 | ai-txt | ai.txt | – | 참고만 | 실험적 제안, 표준 아님 |
+| cf-managed | Cloudflare 관리형 robots.txt | – | 참고만. `# BEGIN Cloudflare Managed content` 블록이 있을 때만 표시 | Cloudflare 가 응답 단계에서 학습용 봇 차단 규칙을 붙인다. 서버 파일에는 없어 운영자가 모르는 경우가 많다 |
+| content-signal | Content-Signal 선언 | – | 참고만. robots.txt 의 `Content-Signal:` 값을 그대로 보여 준다 | contentsignals.org (search · ai-input · ai-train). 초안 단계 |
+| md-negotiation | Markdown 응답 | – | 참고만. `Accept: text/markdown` 요청에 Content-Type text/markdown 이면 지원 | Cloudflare Markdown for Agents 등. 지원하지 않아도 감점 없음 |
 
-검색 · 인용용(감점 대상) 토큰: Googlebot, Bingbot, OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, DuckAssistBot.
+검색 · 인용용(감점 대상) 토큰: Googlebot, Bingbot, OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, DuckAssistBot, Applebot, MistralAI-User, Meta-ExternalFetcher.
+네이버 검색 봇 Yeti 는 판정만 `facts.koBots` 에 남기고 감점하지 않는다. 네이버 AI 브리핑 준비도 평가(`ai-review.md`)에 쓴다.
 학습 · 제어용(감점 없음): GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Bytespider, CCBot, meta-externalagent, Amazonbot.
 robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, 가장 긴 규칙 우선, 동률이면 Allow)으로 현재 페이지 경로에 대해 계산한다.
 
@@ -40,12 +44,14 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 
 | id | 항목 | 가중치 | 통과 / 주의 / 실패 | 근거 |
 |---|---|---|---|---|
-| ld-present | JSON-LD 존재 · 파싱 | 3 | 블록 있고 전부 파싱 / 파싱 오류 또는 Microdata 만 / 없음 | Google 권장 형식 JSON-LD. 문법 오류 블록은 전체 무시 |
+| ld-present | JSON-LD 존재 · 파싱 | 3 | 블록 있고 전부 파싱 / 파싱 오류, Microdata 만, 또는 원본 HTML 에 없고 JS 실행 후에만 생김 / 없음 | Google 권장 형식 JSON-LD. 문법 오류 블록은 전체 무시. JS 주입 마크업은 Google 은 늦게 읽고 대부분의 AI 크롤러는 못 읽는다 |
 | ld-valid | @context · @type 유효 | 2 | schema.org 컨텍스트 + @type / 일부 누락 / – | schema.org 규격 |
 | ld-content-type | 페이지 유형 스키마 | 2 | Article · WebPage · Product 등 / 엔티티만 있음 / 없음 | 글은 Article/BlogPosting(headline · author · datePublished · dateModified) |
 | ld-entity | Organization/Person + sameAs | 2 | sameAs 있음 / 엔티티만 / 없음 | Google Organization 구조화 데이터: sameAs 로 공식 채널을 묶어 같은 실체로 인식 |
 | ld-match | 스키마 ↔ 보이는 본문 일치 | 2 | headline 이 제목/H1 과 일치, FAQ 질문이 본문에 보임 / 불일치 / – | Google: "구조화 데이터가 보이는 텍스트와 일치해야" |
 | faq-note | FAQPage 사용 중 | – | 참고만 | 2023-08 이후 FAQ 리치 결과 축소. 2026 인용 흡수 연구: FAQ 형식 전환 영향력 −5.74% |
+| retired-schema | HowTo · SpecialAnnouncement 사용 중 | – | 참고만. 있을 때만 표시 | HowTo 리치 결과 2023-09 중단, SpecialAnnouncement 지원 종료 |
+| ld-extra | BreadcrumbList · SearchAction · speakable | – | 참고만. 유무와 Google 지원 상태 | Breadcrumb 은 리치 결과 지원, 사이트링크 검색창(SearchAction)은 2024-11 종료, speakable 은 미국 영어 뉴스 베타 |
 
 **FAQPage · HowTo · Speakable 의 유무는 점수에 넣지 않는다.** Google: "AI 기능용 특별한 schema.org 구조화 데이터는 없다."
 
@@ -73,6 +79,7 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 | outbound-sources | 본문 외부 출처 도메인 수 | 2 | ≥ 2 / 1 / 0 | GEO 논문: 출처 인용(Cite Sources) 전략이 가시성을 높였다 |
 | quotes | blockquote · 따옴표 인용 | 1 | ≥ 1 / 0 / – | GEO 논문: 전문가 인용문 주관적 인상 +37% |
 | author | 저자 표기 (schema author · meta · 바이라인) | 2 | 있음 / – / 없음 | E-E-A-T: 바이라인 · Person 스키마 |
+| ld-author | 저자 Person 스키마 상세 | – | 참고만. author 가 Person 객체인지, jobTitle · url · sameAs 유무 | 누가 썼는지 기계가 확인할 수 있게 하는 신호 |
 | dates | 게시 · 갱신일 표기 | 2 | 있음 / – / 없음 | 설계 기준: 콘텐츠 신선도 신호 |
 | freshness | 최근 갱신 | 2 | ≤ 12개월 / ≤ 24개월 / 초과 | 설계 기준 |
 | length | 본문 분량(어절 근사) | 1 | ≥ 1,500 / ≥ 500 / 미만 | 2026 연구: 3,000단어 초과 글 영향력 높음. 홈 · 서비스 페이지엔 부적합 |
@@ -114,7 +121,8 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 
 | id | 항목 | 가중치 | 통과 / 주의 / 실패 | 근거 |
 |---|---|---|---|---|
-| https | HTTPS | 3 | https / – / http | 기본 신뢰 신호 |
+| https | HTTPS · HTTP 리다이렉트 | 3 | https 이고 http:// 주소가 3xx 로 https 에 보내거나 80 포트가 닫힘 / https 이지만 http:// 주소가 그대로 열림 / http | 기본 신뢰 신호. HTTP 가 그대로 열리면 같은 내용의 주소가 두 벌 색인될 수 있다 |
+| security-headers | 보안 헤더 | – | 참고만. HSTS · CSP · X-Content-Type-Options · X-Frame-Options(또는 CSP frame-ancestors) · Referrer-Policy | 순위 요인이 아니라 점수에 넣지 않는다 |
 | tls-chain | TLS 인증서 체인 검증 | 3 | Node 내장 공개 루트 저장소만으로 검증 성공 / – / 중간 인증서 누락 · 만료 · 도메인 불일치 · 자체 서명 | 브라우저는 AIA 로 중간 인증서를 받아오지만 OpenSSL 기반 크롤러 · AI 봇 대부분은 접속 실패. 검증 실패 시 스크립트는 OS 인증서 저장소(`--use-system-ca`)로 재시도해 나머지 점검을 계속한다 |
 | redirects | 리다이렉트 체인 | 2 | ≤ 1홉 / ≤ 3홉 / 초과 | Googlebot 은 최대 10홉까지 추적. 최종 URL 로 1회에 도달하게 |
 | robots-txt | robots.txt | 2 | 텍스트 + Sitemap 지시어 / 없음 또는 Sitemap 미기재 / HTML 반환 · 전체 차단 | RFC 9309 · Google robots.txt 문서: Sitemap 은 절대 URL. 스테이징의 Disallow: / 배포 사고 방지 |
@@ -124,6 +132,31 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 | img-alt | 이미지 alt 비율 | 2 | ≥ 90% / ≥ 70% / 미만. 이미지 없으면 해당 없음 | Google 이미지 문서 · 접근성: 장식 이미지는 alt="" |
 | internal-links | 내부 링크 · 앵커 | 2 | ≥ 5개, 모호 앵커 ≤ 20% / 적음 또는 모호 앵커 많음 / 0개 | Google: 모든 페이지는 내부 링크 1개 이상. 앵커는 서술적 |
 | cwv | Core Web Vitals (Lighthouse 랩) | 2 | LCP ≤ 2.5s · CLS ≤ 0.1 · TBT ≤ 200ms 모두 / 2개 / 그 미만. Lighthouse 생략 시 해당 없음 | web.dev 임계값. INP 는 랩에서 TBT 로 대리 |
+
+## 참고 점수 (종합 미포함)
+
+### 문단 인용 가능성 (스크립트 계산)
+
+geo-seo-claude `scripts/citability_scorer.py` 의 한국어 환산판. 소제목 하나와 그 아래 문단 · 목록 · 표를 한 조각으로 보고(5어절 미만 요소 제외, 20어절 미만 조각은 채점 안 함) 조각마다 100점, 상위 5개 조각 평균을 참고 점수로 쓴다.
+
+| 기준 | 만점 | 규칙 |
+|---|---|---|
+| 즉답 | 30 | 정의 문장 15, 첫 두 문장에 정의 · 수치 15, 질문형 소제목 10, 5 ~ 25어절 문장 비율 × 10, 출처 표지 10 |
+| 자기완결 | 25 | 분량 134 ~ 167어절 10 (100 ~ 200: 7, 80 ~ 250: 4, 30 미만 · 400 초과: 0, 그 밖 2), 지시어(이것 · 그 · 해당 · this 등) 비율 2% 미만 8 · 4% 5 · 6% 3, 고유명사(영문 대문자 단어 + 브랜드명) 3개 이상 7 · 1개 4 |
+| 구조 | 20 | 평균 문장 10 ~ 20어절 8 (8 ~ 25: 5, 그 밖 2), 순서 표현(첫째 · 먼저 · 또한 · first 등) 4, 번호 · 단계 4, 요소 2개 이상 4 |
+| 수치 | 15 | 퍼센트 개당 3 (최대 6), 금액(원 · 달러) 개당 3 (최대 5), 단위 붙은 수(명 · 개 · 건 · 배 등) 개당 2 (최대 4), 2010 ~ 2029년 2, 출처 패턴(“~에 따르면”, 기관명, “(이름 연도)”) 각 2 |
+| 고유성 | 10 | 자체 조사 · 직접 측정 5, 사례 · 예시 3, 사용한 도구 언급 2 |
+
+어절은 기존 `wordCount`(한글 2자 ≈ 1어절) 근사다. 임계값(134 ~ 167단어 등)은 원본 저장소의 값이며 근거가 공개되지 않아 참고로만 쓴다.
+
+### 브랜드 · E-E-A-T · AI 플랫폼 (Claude 판단)
+
+스크립트는 브랜드명(Organization.name → og:site_name → title)으로 위키백과(ko · en, 정확히 같은 제목, 동음이의 문서 제외) · Wikidata(라벨 일치)를 조회하고 sameAs · 페이지 링크에서 공식 채널(네이버 블로그 · 플레이스 · 유튜브 등)을 모은다. 네이버(통합 · 뉴스 최신순 · 블로그 · 카페) · 나무위키(`/w/<브랜드명>`)는 Chrome 으로 직접 열어 화면을 기록한다(kuma collector-poc 의 naver-search.mjs 와 같은 방식: ko-KR · Asia/Seoul · 데스크톱 UA, DOM 로드 뒤 1.5초 대기, 탭 사이 1.2초 쉼). 탭마다 공식 사이트 순위(포털 도메인 제외 외부 도메인 중 순서), 영역 제목, 브랜드 키워드(전체 이름 · 첫 단어 · 도메인 이름)가 제목에 든 결과 최대 15개와 각 결과의 문맥(링크에서 위로 400자 이하인 가장 큰 요소), 화면 텍스트 앞 3,000자(통합 검색은 기업 정보 패널까지 보이게 8,000자)를 `brand.search` 에 남긴다. 나머지 확인과 채점 기준은 `reference/ai-review.md`.
+
+### 부가 산출물
+
+- llms.txt 가 없으면 사이트맵(색인이면 이름에 page, 없으면 post 가 들어간 하위 사이트맵)에서 홈 포함 최대 20개 페이지의 title(끝의 “| 브랜드명” 제거) · description 으로 `<결과 이름>-llms-draft.txt` 초안을 만든다. 하위 경로가 있는 주소는 첫 경로로 `##` 섹션을 나누고, 한 단계 주소는 “주요 페이지”에 모은다. 로그인 · 회원가입 · 장바구니 · wp- 같은 기능 페이지는 뺀다.
+- 보고서 부록에 페이지 값으로 채운 JSON-LD 예시(메인: Organization · WebSite, 콘텐츠: Article · Organization)를 넣는다. 모르는 값은 `<…>` 빈칸으로 둔다.
 
 ## Lighthouse (별도 표기)
 
@@ -161,6 +194,8 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 - Anthropic crawlers — https://support.anthropic.com/en/articles/8896518
 - Perplexity crawlers — https://docs.perplexity.ai/guides/bots
 - llms.txt — https://llmstxt.org/
+- Content Signals — https://contentsignals.org/
+- geo-seo-claude (참고 점수 기준의 원본) — https://github.com/zubair-trabzada/geo-seo-claude
 - Aggarwal et al., GEO: Generative Engine Optimization — https://arxiv.org/abs/2311.09735
 - Zhang et al., From Citation Selection to Citation Absorption — https://arxiv.org/abs/2604.25707
 - RFC 9309 Robots Exclusion Protocol — https://www.rfc-editor.org/rfc/rfc9309

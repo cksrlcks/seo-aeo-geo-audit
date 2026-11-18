@@ -113,7 +113,7 @@ function scoreCard(r, detail) {
 <div class="score-cats">${cats.join("")}</div></div>`;
 }
 
-// 지표 카드. items: [값, 라벨, 톤, 단위]
+// 지표 카드. items: [값, 라벨, 톤, 단위]. 라벨은 검정, 숫자를 판정 색으로
 const statCards = (items) =>
   `<div class="stats">${items.map(([v, label, tone, unit = ""]) => `<div class="stat stat--${tone}"><p class="stat-label">${esc(label)}</p><p class="stat-value">${esc(v)}${unit ? `<span>${esc(unit)}</span>` : ""}</p></div>`).join("")}</div>`;
 const scoreStat = (score, label) => [score ?? "–", label, band(score).tone, score == null ? "" : "/ 100"];
@@ -125,7 +125,7 @@ const table = (cols, head, rows, cls = "tbl") =>
 
 function checksTable(list) {
   return table(["36mm", "24mm", "27mm", "15mm", ""], ["점검 항목", "측정값", "권장 기준", "판정", "진단 내용 · 개선 방법"], list.map((c) => {
-    const fix = !c.fix ? "" : c.status === "warn" || c.status === "fail" ? `<span class="fix"><b>개선</b>${esc(c.fix)}</span>` : c.status !== "pass" ? `<span class="sub">${esc(c.fix)}</span>` : "";
+    const fix = !c.fix ? "" : c.status === "warn" || c.status === "fail" ? `<span class="fix"><b>개선 :</b>${esc(c.fix)}</span>` : c.status !== "pass" ? `<span class="sub">${esc(c.fix)}</span>` : "";
     return `<tr><td>${esc(c.title)}<span class="sub">가중치 ${c.weight}</span></td><td>${esc(c.value)}</td><td class="muted">${esc(c.criterion)}</td><td>${st(c.status)}</td><td>${esc(c.detail)}${fix}</td></tr>`;
   }));
 }
@@ -137,6 +137,31 @@ function botsTable(bots) {
     return `<tr><td>${esc(b.token)}</td><td>${esc(b.vendor)}</td><td>${esc(b.role)}</td><td>${rule}<span class="sub">${esc(b.rule)}</span></td><td>${probe}</td></tr>`;
   }));
 }
+
+// ---------- 참고 점수 (종합 미포함) ----------
+const CITE_PARTS = [
+  ["answer", "즉답", 30, "소제목을 질문형으로 바꾸고 첫 문장에 결론(정의 또는 수치)을 쓰세요."],
+  ["self", "자기완결", 25, "앞 문단 없이도 읽히게 ‘이것 · 해당’ 같은 지시어를 실제 이름으로 바꾸고, 소제목 아래 분량을 한글 약 270 ~ 330자로 맞추세요."],
+  ["structure", "구조", 20, "문장을 짧게 나누고 순서가 있는 내용은 번호 목록으로 쓰세요."],
+  ["stats", "수치", 15, "수치 · 연도와 함께 출처(“~에 따르면”)를 같은 문장에 넣으세요."],
+  ["unique", "고유성", 10, "자체 데이터, 실제 사례, 사용한 도구를 구체적으로 쓰세요."],
+];
+const weakest = (p) => CITE_PARTS.reduce((w, c) => (p.parts[c[0]] / c[2] < p.parts[w[0]] / w[2] ? c : w));
+// Claude 판단 평가(review.json)의 점수. 브랜드는 배점 합 대비 100점 환산, E-E-A-T 는 4개 합, 플랫폼은 평균.
+export function reviewScores(v) {
+  if (!v) return null;
+  const items = v.brand?.items || [];
+  const wsum = items.reduce((a, i) => a + i.weight, 0);
+  return {
+    brand: wsum ? Math.round((100 * items.reduce((a, i) => a + i.score, 0)) / wsum) : null,
+    eeat: v.eeat?.length ? v.eeat.reduce((a, e) => a + e.score, 0) : null,
+    platform: v.platforms?.length ? Math.round(v.platforms.reduce((a, p) => a + p.score, 0) / v.platforms.length) : null,
+  };
+}
+// 포털 검색 화면 기록: 통합 검색의 공식 사이트 순위와 탭별 브랜드 키워드 결과 수(첫 화면, 최대 15)
+const portalCell = (p) => !p?.total?.ok ? stText("neutral", "확인 불가")
+  : `${p.total.officialRank ? stText("pass", `공식 사이트 ${p.total.officialRank}번째`) : stText("neutral", "공식 사이트 없음")}<span class="sub">${[["news", "뉴스"], ["blog", "블로그"], ["cafe", "카페"]].map(([k, l]) => `${l} ${p[k]?.ok ? `${p[k].items.length}건` : "확인 불가"}`).join(", ")} (브랜드 키워드가 든 첫 화면 결과, 동명 결과 포함)</span>`;
+const wikiCell = (w) => (!w?.checked ? stText("neutral", "조회 실패") : w.found ? `${stText("pass", "있음")}<span class="sub">${esc(w.title || w.id || "")}${w.description ? ` · ${esc(w.description)}` : ""}</span>` : `${stText("neutral", "없음")}${w.note ? `<span class="sub">${esc(w.note)}</span>` : ""}`);
 
 const chapter = (id, label, blocks, { pageBreak = true, kind = "" } = {}) =>
   `<section class="chapter" data-id="${id}" data-label="${esc(label)}"${pageBreak ? ' data-break="page"' : ""}${kind ? ` data-kind="${kind}"` : ""}>\n${blocks.filter(Boolean).join("\n")}\n</section>`;
@@ -159,6 +184,8 @@ export function renderFlow(r) {
   const typeLabel = PAGE_TYPE_LABEL[r.pageType] || PAGE_TYPE_LABEL.content;
   const typeInfo = r.pageTypeInfo || {};
   const typeHow = typeInfo.source === "지정" ? "직접 지정" : typeInfo.confident ? "자동 판별" : "자동 판별 실패, 콘텐츠 기준";
+  const cite = r.citability?.count ? r.citability : null; // 이전 버전 JSON 에는 없다
+  const rv = reviewScores(r.review);
 
   // 표지
   const cover = chapter("cover", "표지", [
@@ -188,15 +215,22 @@ export function renderFlow(r) {
   const summary = chapter("summary", "한눈에 보기", [
     secHead({ title: "한눈에 보기", q: "종합 점수와 섹션별 결과" }),
     scoreCard(r, `SEO · AEO · GEO 세 영역 점수의 평균이며 ${typeLabel} 기준으로 채점했습니다. Lighthouse 점수는 별도로 표기합니다.`),
+    // 한눈에 보기의 카드는 색 없이 검정으로
     statCards([
-      [n.pass, "통과 항목", "pass", `/ ${scored.length}`],
-      [n.warn, "주의 항목", n.warn ? "warn" : "neutral", "건"],
-      [n.fail, "실패 항목", n.fail ? "fail" : "neutral", "건"],
-      scoreStat(perf, `Lighthouse 성능(${r.formFactor === "desktop" ? "PC" : "모바일"}기준)`),
+      [n.pass, "통과 항목", "neutral", `/ ${scored.length}`],
+      [n.warn, "주의 항목", "neutral", "건"],
+      [n.fail, "실패 항목", "neutral", "건"],
+      [perf ?? "–", `Lighthouse 성능(${r.formFactor === "desktop" ? "PC" : "모바일"}기준)`, "neutral", perf == null ? "" : "/ 100"],
     ]),
     table(["42mm", "12mm", "12mm", "19mm", "", "14mm"], ["섹션", "영역", ["점수", "num"], "판정", "요약", ["쪽", "ctr"]], [
       ...r.sections.map((s, i) => summaryRow(s.name, s.category, s.score, sectionSummary(s), `s${i + 1}`)),
       summaryRow("Lighthouse 성능", "별도", perf, metricLine, "lighthouse"),
+      ...(cite ? [summaryRow("문단 인용 가능성", "참고", cite.score, `채점 문단 ${cite.count}개, 상위 5개 평균`, "cite")] : []),
+      ...(rv ? [
+        summaryRow("브랜드 언급", "참고", rv.brand, "네이버 · 위키 · YouTube 등 외부 언급", "ai"),
+        summaryRow("E-E-A-T", "참고", rv.eeat, "경험 · 전문성 · 권위 · 신뢰", "ai"),
+        summaryRow("AI 플랫폼 준비도", "참고", rv.platform, `${r.review.platforms.length}개 플랫폼 평균`, "ai"),
+      ] : []),
     ]),
     `<div class="duo">
 <section class="box box--good"><h4>잘 되어 있는 것</h4>${strengths.length ? `<ul>${strengths.map(boxItem).join("")}</ul>` : "<p>통과한 항목이 없습니다.</p>"}</section>
@@ -246,8 +280,7 @@ export function renderFlow(r) {
           scoreLabel: "성능 점수",
           rowsLabel: "핵심 지표",
           scoreRows: cwv.slice(0, 3).map(([k, , v, , ok]) => [k, v, v === "–" ? "neutral" : ok ? "pass" : "warn"]),
-          desc: `Lighthouse ${esc(lh.version)} 을 ${ff} 프리셋으로 1회 실행한 결과입니다. Lighthouse 점수는 종합 점수에 넣지 않습니다.`,
-          note: `${ff === "데스크톱" ? "데스크톱 프리셋은 CPU 1배, 10 Mbps 모의 네트워크" : "모바일 프리셋은 CPU 4배 감속, 느린 4G 모의 네트워크"}로 측정합니다. 랩 측정값이라 시점에 따라 달라지며, Google 의 판정은 실사용자 데이터(CrUX)의 75번째 백분위수를 기준으로 합니다.`,
+          note: `Lighthouse ${lh.version} 을 ${ff} 프리셋으로 1회 실행한 결과이며 종합 점수에 넣지 않습니다. ${ff === "데스크톱" ? "데스크톱 프리셋은 CPU 1배, 10 Mbps 모의 네트워크" : "모바일 프리셋은 CPU 4배 감속, 느린 4G 모의 네트워크"}로 측정합니다. 랩 측정값이라 시점에 따라 달라지며, Google 의 판정은 실사용자 데이터(CrUX)의 75번째 백분위수를 기준으로 합니다.`,
         }),
         statCards([scoreStat(lh.scores.performance, "성능"), scoreStat(lh.scores.accessibility, "접근성"), scoreStat(lh.scores["best-practices"], "권장사항"), scoreStat(lh.scores.seo, "SEO")]),
         `<h3>Core Web Vitals</h3>`,
@@ -258,7 +291,73 @@ export function renderFlow(r) {
           ? `<ul class="list">${lh.failingSeo.map((a) => `<li>${esc(a.title)}</li>`).join("")}</ul>`
           : `<p>크롤링 가능 여부, 문서 제목, 메타 설명, 링크 텍스트, 이미지 alt, hreflang, canonical 등 Lighthouse 의 SEO 감사 항목을 모두 통과했습니다.</p>`,
       ]
-    : [secHead({ num: lhNum, title: "Lighthouse 성능", desc: `Lighthouse 측정을 ${lh.skipped ? "건너뛰었습니다" : "실행하지 못했습니다"} (${esc(lh.reason || lh.error || "알 수 없음")}). Core Web Vitals 항목은 해당 없음으로 처리했습니다.` })]);
+    : [secHead({ num: lhNum, title: "Lighthouse 성능", note: `Lighthouse 측정을 ${lh.skipped ? "건너뛰었습니다" : "실행하지 못했습니다"} (${lh.reason || lh.error || "알 수 없음"}). Core Web Vitals 항목은 해당 없음으로 처리했습니다.` })]);
+
+  // 참고 1: 문단 인용 가능성 (스크립트 계산, 종합 미포함)
+  const citeNum = pad(r.sections.length + 2);
+  // 문단 카드: 왼쪽 내용(소제목 → 미리보기 → 세부 막대 5개 → 개선), 오른쪽 점수 칸(점수 · 판정). 카드 하나가 쪽 나누기 단위다.
+  const citeCards = (list, withTip) => list.map((p) => {
+    const b = band(p.score);
+    return `<article class="pcard">
+<div class="pcard-body">
+<h4>${esc(p.heading)}</h4>
+<p class="pcard-preview">${esc(p.preview)}</p>
+<div class="pcard-bars">${CITE_PARTS.map(([k, l, max]) => `<div><p><span>${l}</span><b>${p.parts[k]}<span>/${max}</span></b></p>${gauge(Math.round((100 * p.parts[k]) / max))}</div>`).join("")}</div>
+${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""}
+</div>
+<div class="pcard-score"><b>${p.score}</b><span class="tone-${b.tone}">${b.label}</span></div>
+</article>`;
+  });
+  const sorted = cite ? [...cite.passages].sort((a, b) => b.score - a.score) : [];
+  const citation = chapter("cite", `${citeNum}  문단 인용 가능성`, cite
+    ? [
+        secHead({
+          num: citeNum, title: "문단 인용 가능성", cat: "참고", q: "소제목 단위 문단이 AI 답변에 그대로 인용되기 좋은 형태인지",
+          score: cite.score, scoreLabel: "참고 점수 (상위 5개 평균)", rowsLabel: "문단",
+          scoreRows: [["채점 문단", `${cite.count}개`, "neutral"], ["적정 길이", `${cite.optimal}개`, "neutral"]],
+          note: "AI 답변은 소제목과 그 아래 문단을 한 조각으로 가져갑니다. 조각마다 즉답(30), 자기완결(25), 구조(20), 수치(15), 고유성(10)을 규칙으로 채점해 상위 5개 평균을 참고 점수로 쓰며, 종합 점수에는 넣지 않습니다. 한글 2자를 1어절로 근사하므로 문단 길이 판정은 실제와 다를 수 있습니다.",
+        }),
+        `<p class="caption">채점 문단: 20어절 이상인 소제목 단위 조각의 수입니다.<br>적정 길이: 그중 분량이 134 ~ 167어절인 문단의 수로, 원본 기준에서 인용되기 가장 좋은 길이입니다(한글 약 270 ~ 330자).</p>`,
+        `<h3>인용되기 좋은 문단<small>채점 문단 ${sorted.length}개 중 상위 ${Math.min(3, sorted.length)}개</small></h3>`,
+        ...citeCards(sorted.slice(0, 3), false),
+        sorted.length > 3 ? `<h3>고치면 좋은 문단<small>채점 문단 ${sorted.length}개 중 하위 ${Math.min(3, sorted.length - 3)}개</small></h3>` : "",
+        ...(sorted.length > 3 ? citeCards(sorted.slice(-Math.min(3, sorted.length - 3)).reverse(), true) : []),
+      ]
+    : [secHead({ num: citeNum, title: "문단 인용 가능성", cat: "참고", note: "20어절 이상인 소제목 단위 문단이 없어 채점하지 않았습니다." })]);
+
+  // 참고 2: 브랜드 · AI 판단 평가 (위키 조회는 스크립트, 나머지는 Claude 가 reference/ai-review.md 기준으로 작성)
+  const aiNum = pad(r.sections.length + 3);
+  const b = r.brand || {};
+  const v = r.review;
+  const aiReview = chapter("ai", `${aiNum}  브랜드 · AI 판단 평가`, [
+    secHead({
+      num: aiNum, title: "브랜드 · AI 판단 평가", cat: "참고", q: "외부 브랜드 언급, E-E-A-T, AI 플랫폼별 준비도",
+      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 조회와 공식 채널 수집은 스크립트가 하고, 채점과 E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
+    }),
+    rv ? statCards([scoreStat(rv.brand, "브랜드 언급"), scoreStat(rv.eeat, "E-E-A-T"), scoreStat(rv.platform, "AI 플랫폼 준비도"), scoreStat(cite?.score ?? null, "문단 인용 가능성")]) : "",
+    `<h3>위키 · 포털 검색 · 공식 채널 (자동 조회)</h3>`,
+    table(["36mm", ""], ["항목", "결과"], [
+      ["위키백과 (한국어)", wikiCell(b.wikipedia?.ko)],
+      ["위키백과 (영어)", wikiCell(b.wikipedia?.en)],
+      ["Wikidata", wikiCell(b.wikidata)],
+      ...(b.search ? [
+        ["네이버 검색", portalCell(b.search.naver)],
+        ["나무위키", !b.search.namu.ok ? stText("neutral", "확인 불가") : b.search.namu.found ? `${stText("pass", "있음")}<span class="sub">${esc(b.search.namu.title)}</span>` : stText("neutral", "없음")],
+      ] : []),
+      ["공식 채널", b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : stText("neutral", "sameAs · 페이지 링크에서 찾지 못함")],
+    ].map(([k, x]) => `<tr><th>${k}</th><td>${x}</td></tr>`), "tbl tbl--kv"),
+    `<p class="caption">위키 문서는 이름이 정확히 같은 문서만 찾습니다. 네이버 · 나무위키는 Chrome 으로 직접 연 화면을 기록한 것이라 동명 회사 결과가 섞일 수 있으니 아래 Claude 확인 결과와 함께 보세요.</p>`,
+    ...(v
+      ? [
+          `<h3>브랜드 언급 (검색 확인)</h3>`,
+          table(["34mm", "", "22mm"], ["플랫폼", "확인 결과", "점수"], v.brand.items.map((i) => `<tr><td>${esc(i.platform)}</td><td>${esc(i.found)}${i.url ? `<span class="sub">${esc(i.url)}</span>` : ""}</td><td class="nowrap"><b>${i.score}</b><span class="of"> / ${i.weight}</span></td></tr>`)),
+          `<h3>E-E-A-T</h3>`,
+          table(["34mm", "", "22mm"], ["항목", "근거 · 개선", "점수"], v.eeat.map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(e.evidence)}${e.fix ? `<span class="fix"><b>개선 :</b>${esc(e.fix)}</span>` : ""}</td><td class="nowrap"><b>${e.score}</b><span class="of"> / 25</span></td></tr>`)),
+          `<h3>AI 플랫폼별 준비도</h3>`,
+          table(["34mm", "", "22mm"], ["플랫폼", "강점 · 부족한 점", "점수"], v.platforms.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.strengths)}${p.gaps ? `<span class="fix"><b>부족 :</b>${esc(p.gaps)}</span>` : ""}</td><td class="nowrap"><b>${p.score}</b><span class="of"> / 100</span></td></tr>`)),
+        ]
+      : [`<p>Claude 판단 평가(브랜드 검색 확인, E-E-A-T, AI 플랫폼별 준비도)가 아직 없습니다. 작성 후 <code>render.mjs --review</code> 로 다시 만들면 이 자리에 들어갑니다.</p>`]),
+  ]);
 
   // 개선 로드맵: 우선순위 범례(건수 · 기준) + 과제 표
   const prioCount = (label) => issues.filter((c) => prio(c)[1] === label).length;
@@ -282,7 +381,7 @@ export function renderFlow(r) {
 
   // 부록
   const appendix = chapter("appendix", "부록", [
-    secHead({ title: "부록", q: "점검 방법, 채점 기준, 참고 자료, 용어", desc: "모든 항목과 기준은 고정되어 있어 다른 시점, 다른 페이지의 결과와 그대로 비교할 수 있습니다." }),
+    secHead({ title: "부록", q: "점검 방법, 채점 기준, 참고 자료, 용어", note: "모든 항목과 기준은 고정되어 있어 다른 시점, 다른 페이지의 결과와 그대로 비교할 수 있습니다." }),
     `<h3>대상과 방법</h3>`,
     table(["30mm", ""], ["항목", "내용"], [
       ["입력 URL", esc(r.url)],
@@ -291,8 +390,10 @@ export function renderFlow(r) {
       ["페이지 유형", `${esc(typeLabel)} (${esc(typeHow)}). 근거: ${esc((typeInfo.reasons || []).join(", ") || "없음")}`],
       ["원본 HTML", "브라우저 User-Agent 로 받은 HTML 을 정적 분석합니다. title, meta, canonical, 헤딩, 링크, 이미지, JSON-LD, 본문 문장."],
       ["렌더링 비교", "Chrome 으로 렌더링한 본문 텍스트 길이와 원본 HTML 텍스트 길이를 비교해 JavaScript 의존도를 봅니다."],
-      ["크롤러 접근", "/robots.txt 를 Google 방식으로 해석해 AI 봇 17종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다."],
-      ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /ai.txt, TLS 인증서 체인."],
+      ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다.`],
+      ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /llms-full.txt, /ai.txt, TLS 인증서 체인, HTTP → HTTPS 리다이렉트, Accept: text/markdown 응답."],
+      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
+      ...(r.files?.llmsDraft ? [["llms.txt 초안", `llms.txt 가 없어 사이트맵의 최대 20개 페이지로 초안을 만들었습니다. 결과 폴더의 ${esc(r.files.llmsDraft.split(/[\\/]/).pop())} 를 검토해 사이트 루트에 올리세요.`]] : []),
       ["Lighthouse", lhOk ? `v${esc(lh.version)} ${ff} 프리셋, 성능 · 접근성 · 권장사항 · SEO.` : "측정 안 됨."],
     ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`), "tbl tbl--kv"),
     r.notes?.length ? `<div class="callout"><h4>점검 시 참고</h4><ul>${r.notes.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>` : "",
@@ -305,8 +406,14 @@ export function renderFlow(r) {
 <li>FAQPage, HowTo, Speakable 스키마의 유무는 점수에 넣지 않습니다. Google 은 AI 기능 노출에 별도 스키마가 필요 없다고 명시했고, FAQ · HowTo 리치 결과는 2023년 이후 축소되었습니다.</li>
 <li>학습용 AI 봇(GPTBot, ClaudeBot, Google-Extended 등)의 차단은 사이트의 정책 선택이므로 감점하지 않습니다. llms.txt 는 비공식 제안이라 가중치 1, ai.txt 는 참고 항목입니다.</li>
 <li>즉답, 출처, 수치, 정의 문장은 규칙 기반으로 측정하므로 사람이 읽은 판단과 다를 수 있습니다. 진단 내용에 예시 문장을 남겨 검증할 수 있게 했습니다.</li>
+<li>문단 인용 가능성, 브랜드 언급, E-E-A-T, AI 플랫폼 준비도는 참고 점수입니다. 앞의 둘은 규칙과 공개 API 로, 뒤의 둘과 브랜드 검색 확인은 Claude 가 고정 기준표로 판단해 매기며 종합 점수에 넣지 않습니다.</li>
 <li>항목별 가중치와 권장 기준은 각 섹션 표에 있습니다.</li>
 </ul>`,
+    ...(r.jsonld?.length
+      ? [`<h3>구조화 데이터 예시 코드</h3>`,
+         `<p>페이지에서 읽은 값으로 채운 예시입니다. &lt;…&gt; 부분을 실제 값으로 바꾸고, 화면에 보이는 내용과 일치하는지 확인한 뒤 &lt;head&gt; 에 넣으세요.</p>`,
+         ...r.jsonld.map((o) => `<pre class="code">${esc(`<script type="application/ld+json">\n${JSON.stringify(o, null, 2)}\n</script>`)}</pre>`)]
+      : []),
     `<h3>참고 자료</h3>`,
     `<ol class="refs">${REFERENCES.map(([t, u]) => `<li>${esc(t)}<span class="sub">${esc(u)}</span></li>`).join("")}</ol>`,
     `<h3>용어</h3>`,
@@ -324,7 +431,7 @@ export function renderFlow(r) {
 <header class="toolbar"><p><b>${esc(TITLE)}</b>${esc(r.host)}</p><div class="toolbar-actions"><span data-total></span><button class="btn" type="button" onclick="print()">인쇄 또는 PDF 저장</button></div></header>
 <main class="book" id="book"></main>
 <div id="flow">
-${[cover, summary, ...sections, lighthouse, roadmap, appendix].join("\n")}
+${[cover, summary, ...sections, lighthouse, citation, aiReview, roadmap, appendix].join("\n")}
 </div>
 <script type="application/json" id="report-meta">${JSON.stringify(meta).replace(/</g, "\\u003c")}</script>
 <script>(()=>{const f=()=>document.documentElement.style.setProperty("--fit",Math.min(1,(innerWidth-16)/794).toFixed(3));f();addEventListener("resize",f);})();</script>

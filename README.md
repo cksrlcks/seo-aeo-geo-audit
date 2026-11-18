@@ -61,6 +61,7 @@ https://example.com SEO · AEO · GEO 점검해서 보고서 만들어줘
 | `skills/seo-aeo-geo-audit/scripts/audit.mjs` | 수집 · 채점 · 파일 출력 |
 | `skills/seo-aeo-geo-audit/scripts/report.mjs` | 보고서 구조 · 문구와 A4 쪽 나누기 |
 | `skills/seo-aeo-geo-audit/scripts/report.css` | 보고서 스타일(스타일 가이드 구현) |
+| `skills/seo-aeo-geo-audit/scripts/render.mjs` | 저장된 점검 JSON 으로 보고서 HTML · PDF 만 다시 그리기(양식 수정용) |
 
 ## 보고서 양식 · 채점 기준을 고칠 때
 
@@ -75,6 +76,10 @@ https://example.com SEO · AEO · GEO 점검해서 보고서 만들어줘
    node audit.mjs https://example.com --out ~/audit-test
    ```
    출력 끝에 HTML 과 PDF 쪽수가 같게 나오면 쪽 나누기가 정상입니다. `--skip-lighthouse --no-pdf` 를 붙이면 빠르게 볼 수 있습니다.
+   양식만 고칠 때는 점검을 다시 돌리지 않고 이미 만든 JSON 으로 다시 그립니다(몇 초).
+   ```bash
+   node render.mjs ~/audit-test/audit-example.com-....json ~/audit-test/preview
+   ```
 3. `.claude-plugin/plugin.json` 의 `version` 을 올립니다. 보고서 바닥글의 버전 표기도 여기서 읽습니다.
 4. `claude plugin validate .` 로 확인한 뒤 커밋 · 푸시합니다.
 5. 팀원은 위 업데이트 명령으로 받습니다.

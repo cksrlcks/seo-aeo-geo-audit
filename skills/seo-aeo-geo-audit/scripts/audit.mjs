@@ -471,12 +471,12 @@ const probeBlocked = bots.filter((b) => b.probe != null && !(b.probe >= 200 && b
 
 // ---------- 체크 ----------
 const S = {
-  crawl: ["AI 크롤러 접근", "GEO", "AI 크롤러가 접근 가능한 상태인가"],
-  schema: ["구조화 데이터", "AEO", "구조화 데이터가 유효하게 붙어 있는가"],
-  answer: HOME ? ["핵심 소개 문단", "AEO", "회사 · 서비스를 한두 문장으로 소개하는 텍스트가 있는가"] : ["즉답 문단", "AEO", "질문에 즉답하는 문단이 있는가"],
-  evidence: HOME ? ["운영 주체 · 신뢰 정보", "GEO", "운영 주체와 신뢰 정보가 표기돼 있는가"] : ["출처 · 수치 · 갱신일", "GEO", "출처 · 수치 · 갱신일이 표기돼 있는가"],
-  meta: ["제목 · 메타 · 표준 URL", "SEO", "제목 · 메타 · 표준 URL이 정리돼 있는가"],
-  tech: ["기술 기본 · 페이지 경험", "SEO", "크롤링 · 색인 기본과 Core Web Vitals 가 갖춰져 있는가"],
+  crawl: ["AI 크롤러 접근", "GEO"],
+  schema: ["구조화 데이터", "AEO"],
+  answer: HOME ? ["핵심 소개 문단", "AEO"] : ["즉답 문단", "AEO"],
+  evidence: HOME ? ["운영 주체 · 신뢰 정보", "GEO"] : ["출처 · 수치 · 갱신일", "GEO"],
+  meta: ["제목 · 메타 · 표준 URL", "SEO"],
+  tech: ["기술 기본 · 페이지 경험", "SEO"],
 };
 const checks = [];
 // 보고서 "권장 기준" 칸. 아래 판정 로직과 reference/checks.md 의 통과 기준을 짧게 옮긴 것.
@@ -917,11 +917,11 @@ const scoreOf = (list) => {
   if (!s.length) return null;
   return Math.round((100 * s.reduce((a, c) => a + c.weight * c.score, 0)) / s.reduce((a, c) => a + c.weight, 0));
 };
-const sections = Object.values(S).map(([name, category, question]) => {
+const sections = Object.values(S).map(([name, category]) => {
   const list = checks.filter((c) => c.section === name);
   const counts = { pass: 0, warn: 0, fail: 0, na: 0, info: 0 };
   list.forEach((c) => counts[c.status]++);
-  return { name, category, question, score: scoreOf(list), counts };
+  return { name, category, score: scoreOf(list), counts };
 });
 const categories = ["SEO", "AEO", "GEO"].map((name) => ({ name, score: scoreOf(checks.filter((c) => c.category === name)) }));
 const catScores = categories.map((c) => c.score).filter((s) => s != null);

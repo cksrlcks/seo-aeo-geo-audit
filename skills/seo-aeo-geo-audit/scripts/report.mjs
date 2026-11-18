@@ -17,11 +17,13 @@ const pad = (n) => String(n).padStart(2, "0");
 const band = (s) =>
   s == null ? { tone: "neutral", label: "측정 안 됨" } : s >= 90 ? { tone: "pass", label: "양호" } : s >= 50 ? { tone: "warn", label: "개선 필요" } : { tone: "fail", label: "미흡" };
 const STATUS = { pass: ["pass", "통과"], warn: ["warn", "주의"], fail: ["fail", "실패"], na: ["neutral", "해당 없음"], info: ["neutral", "참고"] };
-const stText = (tone, label) => `<span class="st tone-${tone}"><i></i>${esc(label)}</span>`;
+// 판정 표시: 판정 색 글자
+const stText = (tone, label) => `<span class="st tone-${tone}">${esc(label)}</span>`;
 const st = (s) => stText(...(STATUS[s] || STATUS.na));
 const bandText = (score) => { const b = band(score); return stText(b.tone, b.label); };
 const prio = (c) => (c.status === "fail" && c.weight === 3 ? ["fail", "즉시"] : c.status === "fail" ? ["warn", "단기"] : ["neutral", "권장"]);
-const bar = (score) => `<span class="bar"><span class="bar-fill bar-fill--${band(score).tone}" style="width:${score ?? 0}%"></span></span>`;
+// 점수 게이지: 판정 구간 색 그라디언트 막대 + 점수 위치 ▼ 표시
+const gauge = (score) => `<span class="gauge">${score == null ? "" : `<i style="left:clamp(5px, ${score}%, calc(100% - 5px))"></i>`}</span>`;
 const worstFirst = (a, b) => (a.status === b.status ? b.weight - a.weight : a.status === "fail" ? -1 : 1);
 // 요약 박스 항목: 항목명 한 줄, 측정값과 권장 기준 한 줄. 자르지 않는다.
 const boxItem = (c) => `<li><b>${esc(c.title)}</b><span class="sub">측정값 ${esc(c.value)}, 권장 기준 ${esc(c.criterion)}</span></li>`;
@@ -33,6 +35,17 @@ const NON_GUARANTEES = [
   "모든 엔진(ChatGPT, Perplexity, Google AI 오버뷰 등)에서 동일한 결과",
   "경쟁사 대비 항상 우위",
 ];
+// 섹션 제목 아래 한 줄: 무엇을 보는지 명사형으로
+const SECTION_Q = {
+  "AI 크롤러 접근": "검색엔진 · AI 크롤러의 페이지 접근 가능 여부",
+  "구조화 데이터": "schema.org 마크업의 유효성과 화면 내용 일치 여부",
+  "즉답 문단": "질문형 소제목 아래 바로 답하는 문단 유무",
+  "출처 · 수치 · 갱신일": "출처 · 수치 · 저자 · 갱신일 표기 여부",
+  "제목 · 메타 · 표준 URL": "제목 · 메타 설명 · 표준 URL 설정 상태",
+  "기술 기본 · 페이지 경험": "크롤링 · 색인 기본 요건과 Core Web Vitals 충족 여부",
+  "핵심 소개 문단": "회사 · 서비스를 한두 문장으로 소개하는 텍스트 유무",
+  "운영 주체 · 신뢰 정보": "운영 주체와 신뢰 정보 표기 여부",
+};
 const SECTION_NOTE = {
   "AI 크롤러 접근": "검색엔진과 AI 서비스가 페이지를 가져가지 못하면 그 뒤의 최적화는 효과가 없습니다. robots.txt 규칙, 봇 요청에 대한 서버 응답, 색인 · 스니펫 지시어, JavaScript 없이 본문이 읽히는지를 봅니다.",
   "구조화 데이터": "schema.org 마크업은 페이지가 무엇에 관한 것이고 누가 운영하는지를 기계가 읽게 합니다. 있는지보다 문법이 유효한지, 화면 내용과 일치하는지가 중요합니다.",
@@ -67,32 +80,36 @@ const GLOSSARY = [
 ];
 
 // ---------- 컴포넌트 ----------
-// 섹션 머리: 번호 · 제목 · 질문, 오른쪽 점수 블록, 아래 남색 2px 선, 그 아래 결과 문장과 설명.
-function secHead({ num = "", title, q = "", score, desc = "", note = "" }) {
-  const scoreBlock = score === undefined ? "" : `<div class="sec-score"><p class="sec-score-num"><b>${score ?? "–"}</b><span> / 100</span></p>${bandText(score)}${bar(score)}</div>`;
+// 안내 배너 아이콘(lucide lightbulb)
+const BULB = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>';
+// 섹션 머리: 번호 · 제목 · 부제, 오른쪽 점수 블록(한눈에 보기 종합 점수와 같은 구성), 아래 남색 2px 선, 그 아래 설명.
+// scoreRows: [[라벨, 값, 톤]] — 점수표 왼쪽 칸에 가로로 나열(점수는 오른쪽 칸). 값이 0 이면 회색. rowsLabel 은 왼쪽 칸 머리.
+function secHead({ num = "", cat = "", title, q = "", score, scoreLabel = "섹션 점수", scoreRows = [], rowsLabel = "점검 결과", desc = "", note = "" }) {
+  const b = band(score);
+  const items = scoreRows.map(([k, v, t]) => `<div><span class="tone-${t}">${k}</span><b class="tone-${v ? t : "neutral"}">${v}</b></div>`).join("");
+  const scoreBlock = score === undefined ? "" : `<div class="sec-score"><table class="grade"><thead><tr>${items ? `<th>${esc(rowsLabel)}</th>` : ""}<th class="grade-head-score">${esc(scoreLabel)}</th></tr></thead><tbody><tr>${items ? `<td class="grade-items"><div class="grade-list">${items}</div></td>` : ""}<td class="grade-score"><b>${score ?? "–"}</b><span class="tone-${b.tone}">${b.label}</span></td></tr></tbody></table></div>`;
   return `<header class="sec-head">
-<div class="sec-top"><div class="sec-title">${num ? `<p class="sec-num">${esc(num)}</p>` : ""}<h2>${esc(title)}</h2>${q ? `<p class="sec-q">${esc(q)}</p>` : ""}</div>${scoreBlock}</div>
-${desc ? `<p class="sec-desc">${desc}</p>` : ""}${note ? `<p class="sec-note">${esc(note)}</p>` : ""}
+<div class="sec-top"><div class="sec-title">${num ? `<p class="sec-num">${esc(num)}</p>` : ""}<h2>${esc(title)}${cat ? `<span class="sec-cat">${esc(cat)} 영역</span>` : ""}</h2>${q ? `<p class="sec-q">${esc(q)}</p>` : ""}</div>${scoreBlock}</div>
+${desc ? `<p class="sec-desc">${desc}</p>` : ""}${note ? `<div class="sec-note">${BULB}<p>${esc(note)}</p></div>` : ""}
 </header>`;
 }
 
 // 종합 점수 원형 차트
-function ring(score, px = 132) {
+function ring(score, px = 132, label = "종합 점수") {
   const b = band(score), r = 52, c = 2 * Math.PI * r;
-  return `<svg class="ring" viewBox="0 0 120 120" width="${px}" height="${px}" role="img" aria-label="종합 점수 ${score ?? "측정 안 됨"}점, ${b.label}">
+  return `<svg class="ring" viewBox="0 0 120 120" width="${px}" height="${px}" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">
 <circle class="ring-track" cx="60" cy="60" r="${r}"/>
 <circle class="ring-arc ring-arc--${b.tone}" cx="60" cy="60" r="${r}" stroke-dasharray="${((c * (score ?? 0)) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 60 60)"/>
-<text class="ring-num" x="60" y="66" text-anchor="middle">${score ?? "–"}</text>
-<text class="ring-unit" x="60" y="82" text-anchor="middle">/ 100</text>
+<text class="ring-num" x="60" y="61" text-anchor="middle" dominant-baseline="central">${score ?? "–"}</text>
 </svg>`;
 }
 
 // 종합 점수표: 원형 차트 + 구간 · 설명 + SEO · AEO · GEO 막대
 function scoreCard(r, detail) {
   const b = band(r.overall);
-  const cats = [["SEO", "검색엔진"], ["AEO", "답변 엔진"], ["GEO", "생성형 엔진"]].map(([n, l]) => {
+  const cats = [["SEO", "검색 엔진"], ["AEO", "답변 엔진"], ["GEO", "생성형 엔진"]].map(([n, l]) => {
     const s = r.categories.find((c) => c.name === n)?.score ?? null;
-    return `<div class="score-cat"><span><b class="cat-name">${n}</b> ${l}</span><b class="tone-${band(s).tone}">${s ?? "–"}</b>${bar(s)}</div>`;
+    return `<div class="score-cat"><span><b class="cat-name">${n}</b> ${l}</span><b class="tone-${band(s).tone}">${s ?? "–"}${s == null ? "" : '<span class="unit">점</span>'}</b>${gauge(s)}</div>`;
   });
   return `<div class="score-card">${ring(r.overall)}
 <div class="score-text"><p class="score-title">종합 점수</p><p class="score-band tone-${b.tone}">${r.overall ?? "–"}점 · ${b.label}</p><p class="score-detail">${detail}</p></div>
@@ -101,7 +118,7 @@ function scoreCard(r, detail) {
 
 // 지표 카드. items: [값, 라벨, 톤, 단위]
 const statCards = (items) =>
-  `<div class="stats">${items.map(([v, label, tone, unit = ""]) => `<div class="stat stat--${tone}"><p class="stat-value">${esc(v)}${unit ? `<span>${esc(unit)}</span>` : ""}</p><p class="stat-label">${esc(label)}</p></div>`).join("")}</div>`;
+  `<div class="stats">${items.map(([v, label, tone, unit = ""]) => `<div class="stat stat--${tone}"><p class="stat-label">${esc(label)}</p><p class="stat-value">${esc(v)}${unit ? `<span>${esc(unit)}</span>` : ""}</p></div>`).join("")}</div>`;
 const scoreStat = (score, label) => [score ?? "–", label, band(score).tone, score == null ? "" : "/ 100"];
 
 const table = (cols, head, rows, cls = "tbl") =>
@@ -142,7 +159,6 @@ export function renderFlow(r) {
   const strengths = r.checks.filter((c) => c.status === "pass").sort((a, b) => b.weight - a.weight).slice(0, 4);
   const m = lh.metrics || {};
   const metricLine = lhOk ? `LCP ${(m.lcp / 1000).toFixed(2)}s, CLS ${m.cls?.toFixed(3)}, TBT ${Math.round(m.tbt)}ms` : "측정 안 됨";
-  const scoreDetail = `SEO · AEO · GEO 세 영역 점수의 평균입니다. 채점 ${scored.length}개 항목 중 통과 ${n.pass}개, 주의 ${n.warn}개, 실패 ${n.fail}개입니다.`;
   const typeLabel = PAGE_TYPE_LABEL[r.pageType] || PAGE_TYPE_LABEL.content;
   const typeInfo = r.pageTypeInfo || {};
   const typeHow = typeInfo.source === "지정" ? "직접 지정" : typeInfo.confident ? "자동 판별" : "자동 판별 실패, 콘텐츠 기준";
@@ -150,15 +166,13 @@ export function renderFlow(r) {
   // 표지
   const cover = chapter("cover", "표지", [
     `<div class="cover-top">
-<div class="cover-kicker"><span>웹사이트 점검 보고서</span><span>${dateStr}</span></div>
-<div><h1 class="cover-title">SEO · AEO · GEO 노출 준비 상태 진단</h1><p class="cover-subject">${esc(r.host)}</p><p class="cover-url">${esc(r.finalUrl)}</p></div>
+<div class="cover-kicker"><span>웹사이트 점검 보고서</span></div>
+<div class="cover-head"><h1 class="cover-title">SEO · AEO · GEO 노출 준비 상태 진단</h1><p class="cover-subject">${esc(r.host)}</p><p class="cover-url">${esc(r.finalUrl)}</p></div>
 </div>`,
     `<div class="cover">
-${scoreCard(r, scoreDetail)}
 <div class="callout cover-callout"><h4>이 보고서가 보장하지 않는 것</h4><ul>${NON_GUARANTEES.map((t) => `<li>${esc(t)}</li>`).join("")}</ul><p class="caption">실제 인용 여부는 각 AI 서비스의 정책, 질문, 경쟁 문서에 따라 달라집니다. 이 보고서는 그 전제 조건이 갖춰졌는지를 측정합니다.</p></div>
 <dl class="cover-meta">
 <div><dt>점검 일시</dt><dd>${dateStr}</dd></div>
-<div><dt>페이지 유형</dt><dd>${esc(typeLabel)} (${esc(typeHow)})</dd></div>
 <div><dt>Lighthouse</dt><dd>${lhOk ? `v${esc(lh.version)} ${ff}` : "측정 안 됨"}</dd></div>
 <div><dt>${r.author ? "작성" : "생성 도구"}</dt><dd>${esc(r.author || `${r.tool} v${r.version}`)}</dd></div>
 </dl>
@@ -173,7 +187,7 @@ ${scoreCard(r, scoreDetail)}
     return bad.length ? `${bad[0].title}${bad.length > 1 ? ` 외 ${bad.length - 1}건` : ""} 개선 필요` : `채점 항목 ${list.filter((c) => c.score !== null).length}개 모두 통과`;
   };
   const summaryRow = (name, area, score, summary, pageOf) =>
-    `<tr><td>${esc(name)}</td><td class="muted">${esc(area)}</td><td class="num"><b>${score ?? "–"}</b></td><td>${bandText(score)}</td><td>${esc(summary)}</td><td class="num muted" data-page-of="${pageOf}"></td></tr>`;
+    `<tr><td>${esc(name)}</td><td class="muted">${esc(area)}</td><td class="num"><b>${score ?? "–"}</b></td><td>${bandText(score)}</td><td>${esc(summary)}</td><td class="ctr muted" data-page-of="${pageOf}"></td></tr>`;
   const summary = chapter("summary", "한눈에 보기", [
     secHead({ title: "한눈에 보기", q: "종합 점수와 섹션별 결과" }),
     scoreCard(r, `SEO · AEO · GEO 세 영역 점수의 평균이며 ${typeLabel} 기준으로 채점했습니다. Lighthouse 점수는 별도로 표기합니다.`),
@@ -181,16 +195,16 @@ ${scoreCard(r, scoreDetail)}
       [n.pass, "통과 항목", "pass", `/ ${scored.length}`],
       [n.warn, "주의 항목", n.warn ? "warn" : "neutral", "건"],
       [n.fail, "실패 항목", n.fail ? "fail" : "neutral", "건"],
-      scoreStat(perf, `Lighthouse 성능 · ${ff}`),
+      scoreStat(perf, `Lighthouse 성능(${r.formFactor === "desktop" ? "PC" : "모바일"}기준)`),
     ]),
-    `<div class="duo">
-<section class="box box--good"><h4>${stText("pass", "")}잘 되어 있는 것</h4>${strengths.length ? `<ul>${strengths.map(boxItem).join("")}</ul>` : "<p>통과한 항목이 없습니다.</p>"}</section>
-<section class="box box--bad"><h4>${stText("fail", "")}수정해야 할 것</h4>${issues.length ? `<ul>${issues.slice(0, 4).map(boxItem).join("")}</ul>${issues.length > 4 ? `<p class="caption">외 ${issues.length - 4}건은 개선 로드맵에 있습니다.</p>` : ""}` : "<p>실패 · 주의 항목이 없습니다.</p>"}</section>
-</div>`,
-    table(["42mm", "12mm", "12mm", "19mm", "", "9mm"], ["섹션", "영역", ["점수", "num"], "판정", "요약", ["쪽", "num"]], [
+    table(["42mm", "12mm", "12mm", "19mm", "", "14mm"], ["섹션", "영역", ["점수", "num"], "판정", "요약", ["쪽", "ctr"]], [
       ...r.sections.map((s, i) => summaryRow(s.name, s.category, s.score, sectionSummary(s), `s${i + 1}`)),
       summaryRow("Lighthouse 성능", "별도", perf, metricLine, "lighthouse"),
     ]),
+    `<div class="duo">
+<section class="box box--good"><h4>잘 되어 있는 것</h4>${strengths.length ? `<ul>${strengths.map(boxItem).join("")}</ul>` : "<p>통과한 항목이 없습니다.</p>"}</section>
+<section class="box box--bad"><h4>수정해야 할 것</h4>${issues.length ? `<ul>${issues.slice(0, 4).map(boxItem).join("")}</ul>${issues.length > 4 ? `<p class="caption">외 ${issues.length - 4}건은 개선 로드맵에 있습니다.</p>` : ""}` : "<p>실패 · 주의 항목이 없습니다.</p>"}</section>
+</div>`,
   ]);
 
   // 섹션 01 ~ 06
@@ -201,9 +215,10 @@ ${scoreCard(r, scoreDetail)}
       secHead({
         num: pad(i + 1),
         title: s.name,
-        q: s.question,
+        q: SECTION_Q[s.name],
         score: s.score,
-        desc: `채점 항목 ${c.pass + c.warn + c.fail}개 중 통과 ${c.pass}개, 주의 ${c.warn}개, 실패 ${c.fail}개${extra ? `, 참고 ${extra}개` : ""}입니다. ${s.category} 점수에 반영됩니다.`,
+        cat: s.category,
+        scoreRows: [["통과", c.pass, "pass"], ["주의", c.warn, "warn"], ["실패", c.fail, "fail"], ...(extra ? [["참고", extra, "neutral"]] : [])],
         note: SECTION_NOTE[s.name],
       }),
       checksTable(r.checks.filter((x) => x.section === s.name)),
@@ -231,6 +246,9 @@ ${scoreCard(r, scoreDetail)}
           title: "Lighthouse 성능",
           q: `${ff} 프리셋 랩 측정`,
           score: perf,
+          scoreLabel: "성능 점수",
+          rowsLabel: "핵심 지표",
+          scoreRows: cwv.slice(0, 3).map(([k, , v, , ok]) => [k, v, v === "–" ? "neutral" : ok ? "pass" : "warn"]),
           desc: `Lighthouse ${esc(lh.version)} 을 ${ff} 프리셋으로 1회 실행한 결과입니다. Lighthouse 점수는 종합 점수에 넣지 않습니다.`,
           note: `${ff === "데스크톱" ? "데스크톱 프리셋은 CPU 1배, 10 Mbps 모의 네트워크" : "모바일 프리셋은 CPU 4배 감속, 느린 4G 모의 네트워크"}로 측정합니다. 랩 측정값이라 시점에 따라 달라지며, Google 의 판정은 실사용자 데이터(CrUX)의 75번째 백분위수를 기준으로 합니다.`,
         }),
@@ -245,18 +263,20 @@ ${scoreCard(r, scoreDetail)}
       ]
     : [secHead({ num: lhNum, title: "Lighthouse 성능", desc: `Lighthouse 측정을 ${lh.skipped ? "건너뛰었습니다" : "실행하지 못했습니다"} (${esc(lh.reason || lh.error || "알 수 없음")}). Core Web Vitals 항목은 해당 없음으로 처리했습니다.` })]);
 
-  // 개선 로드맵
+  // 개선 로드맵: 우선순위 범례(건수 · 기준) + 과제 표
+  const prioCount = (label) => issues.filter((c) => prio(c)[1] === label).length;
+  const prioLegend = `<div class="prio">${[
+    ["즉시", "fail", "노출 자체를 막거나 신뢰를 크게 깎는 가중치 3 실패 항목"],
+    ["단기", "warn", "그 밖의 실패 항목"],
+    ["권장", "neutral", "주의 항목"],
+  ].map(([label, tone, dsc]) => { const k = prioCount(label); return `<div class="prio--${tone}"><div class="prio-top"><p class="prio-label tone-${tone}">${label}</p><p class="prio-n">${k}<span>건</span></p></div><p class="prio-desc">${dsc}</p></div>`; }).join("")}</div>`;
   const roadmap = chapter("roadmap", "개선 로드맵", [
-    secHead({
-      title: "개선 로드맵",
-      q: "우선순위별 수정 과제",
-      desc: issues.length ? `실패 ${n.fail}건, 주의 ${n.warn}건을 우선순위 순서로 정리했습니다.` : "실패 · 주의 항목이 없습니다.",
-      note: "즉시는 가중치 3 의 실패 항목으로, 노출 자체를 막거나 신뢰를 크게 깎는 문제입니다. 단기는 그 밖의 실패, 권장은 주의 항목입니다.",
-    }),
+    secHead({ title: "개선 로드맵", q: "우선순위별 수정 과제" }),
+    prioLegend,
     issues.length
-      ? table(["11mm", "15mm", "44mm", "24mm", ""], [["순위", "num"], "구분", "과제", "측정값", "개선 방법"], issues.map((c, i) => {
+      ? table(["11mm", "15mm", "44mm", "24mm", ""], [["순위", "ctr"], "구분", "과제", "측정값", "개선 방법"], issues.map((c, i) => {
           const [tone, label] = prio(c);
-          return `<tr><td class="num">${i + 1}</td><td>${stText(tone, label)}</td><td><b>${esc(c.title)}</b><span class="sub">${esc(c.section)} · ${esc(c.category)}</span></td><td>${esc(c.value)}</td><td>${esc(c.fix || c.detail)}</td></tr>`;
+          return `<tr><td class="ctr">${i + 1}</td><td>${stText(tone, label)}</td><td><b>${esc(c.title)}</b><span class="sub">${esc(c.section)} · ${esc(c.category)}</span></td><td>${esc(c.value)}</td><td>${esc(c.fix || c.detail)}</td></tr>`;
         }))
       : "",
     `<h3>다음 점검</h3>`,
@@ -323,6 +343,19 @@ export function paginate() {
   const meta = JSON.parse(document.getElementById("report-meta").textContent);
   const el = (tag, cls, html = "") => Object.assign(document.createElement(tag), { className: cls, innerHTML: html });
   const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+
+  // 숫자 묶음을 <span class="n"> 으로 감싼다(자간을 좁히려고). SVG 안은 제외.
+  const walker = document.createTreeWalker(flow, NodeFilter.SHOW_TEXT, { acceptNode: (t) => (/\d/.test(t.data) && !t.parentElement.closest("svg") ? 1 : 2) });
+  const texts = [];
+  while (walker.nextNode()) texts.push(walker.currentNode);
+  for (const t of texts) {
+    const frag = document.createDocumentFragment();
+    t.data.split(/(\d+(?:[.,:]\d+)*)/).forEach((part, i) => {
+      if (!part) return;
+      frag.append(i % 2 ? Object.assign(document.createElement("span"), { className: "n", textContent: part }) : part);
+    });
+    t.replaceWith(frag);
+  }
 
   const newSheet = () => {
     const sheet = el("section", "sheet");

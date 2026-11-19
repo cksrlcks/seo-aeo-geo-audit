@@ -109,9 +109,11 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 
 | id | 항목 | 가중치 | 통과 / 주의 / 실패 | 근거 |
 |---|---|---|---|---|
-| title | title 태그 | 3 | 1개 · 15 ~ 60자 / 길이 벗어남 · 중복 / 없음 | Google: 서술적이고 간결한 고유 title. 표시 폭 약 600px(서드파티 실측) |
+| title | title 태그 | 3 | 1개 · 60자 이하 / 60자 초과 · 2개 이상 / 없음. 최소 길이는 보지 않는다(Google 에 하한 기준이 없고, 상호명만 있는 title 은 intro-snippet 이 따로 본다) | Google: 서술적이고 간결한 고유 title. 표시 폭 약 600px(서드파티 실측) |
+| title-unique | 페이지별 title 고유성 | 2 | 사이트맵 페이지 title 모두 다름 / 같은 title 을 쓰는 페이지가 절반 미만 / 절반 이상. 사이트맵(색인이면 page · post 하위 사이트맵 하나)에서 홈 포함 최대 20쪽의 title 을 비교한다. 같은 페이지의 다른 주소(리다이렉트 도착지, / 와 /index.php, canonical 이 같은 주소)는 하나로 센다. 읽은 페이지가 3쪽 미만이면 해당 없음 | Google: 페이지마다 고유한 title. 같은 title 은 검색 결과에서 구분되지 않는다 |
 | meta-description | meta description | 2 | 1개 · 50 ~ 160자 / 길이 · 중복 / 없음 | Google: 순위 요인이 아니라 스니펫 후보. 공식 상한이 없어 권장 범위만 본다 |
 | canonical | canonical | 3 | 절대 URL 자기 참조 1개 / 다른 URL · 상대경로 · 복수 / 없음 | Google: canonical 은 힌트. 절대 URL · 자기 참조 · 복수 금지(복수면 무시될 수 있음) |
+| home-duplicate | 메인 페이지 중복 주소 (메인 · 소개 유형만) | 2 | 중복 없음 / 별칭 주소가 리다이렉트 없이 같은 메인을 200 으로 냄(메인 canonical 없음) / 루트가 200 으로 열린 뒤 JS · meta refresh 로 다른 주소로 넘어감(프론트 리다이렉트). 별칭 후보는 /index.php · /index.html · /index.htm · /index.jsp · /index.asp · /main · /main.php · /main.html · /main.do · /home 과 메인 안 링크 중 index · main · home 으로 끝나는 주소(최대 15개). 같은 메인 여부는 title 일치로 본다. 프론트 리다이렉트는 렌더링 비교 때 Chrome 의 최종 주소로 확인한다(Chrome 없으면 meta refresh 만) | Google: 같은 내용은 한 주소로 모으고(301 · canonical) JS 리다이렉트보다 서버 리다이렉트를 권장. JS 를 실행하지 않는 AI 크롤러는 루트에서 빈 페이지만 본다 |
 | lang | html lang | 1 | 있음 / – / 없음 | 접근성 · 언어 판별 |
 | og | og:title · description · image | 1 | 3개 / title 만 / 없음 | 공유 · 카드 노출 |
 | viewport | viewport | 1 | width=device-width / – / 없음 | 모바일 우선 색인 |

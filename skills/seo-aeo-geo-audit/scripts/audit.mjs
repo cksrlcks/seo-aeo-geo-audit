@@ -295,7 +295,7 @@ async function renderedText(url) {
     await p.setUserAgent(BROWSER_UA);
     await p.goto(url, { waitUntil: "networkidle2", timeout: 45000 }).catch(() => p.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 }));
     const [text, ldCount] = await p.evaluate(() => [document.body?.innerText || "", document.querySelectorAll('script[type="application/ld+json"]').length]);
-    return { text: norm(text), ldCount };
+    return { text: norm(text), ldCount, finalUrl: p.url() }; // finalUrl: JS · meta refresh 로 넘어간 뒤의 주소(메인 중복 점검)
   } catch (e) {
     return { error: e.message };
   } finally {
@@ -351,11 +351,61 @@ async function probeBots(list) {
   return out;
 }
 
+// 사이트맵에서 홈 포함 최대 20개 페이지의 title · description 을 읽는다. title 고유성 점검과 llms.txt 초안이 같이 쓴다.
+// 색인 사이트맵이면 이름에 page, 없으면 post 가 들어간 하위 사이트맵 하나만 본다. 계정 · 결제 같은 기능 페이지는 뺀다.
+async function samplePages() {
+  const locs = (xml) => [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, "&"));
+  let xml = sitemapXml;
+  if (/<sitemapindex/i.test(xml)) {
+    const subs = locs(xml);
+    const pick = subs.find((u) => /page/i.test(u)) || subs.find((u) => /post/i.test(u)) || subs[0];
+    xml = pick ? (await fetchFollow(pick, { timeout: 15000 })).text || "" : "";
+  }
+  const sameHost = (u) => { try { return new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; } };
+  const utility = /\/(log-?in|log-?out|sign-?(in|up)|join|register|modify|my-?(account|page)|cart|checkout|wp-[a-z]+)(\/|$)/i;
+  const urls = [...new Set([origin + "/", ...locs(xml)])].filter((u) => sameHost(u) && !utility.test(new URL(u).pathname)).slice(0, 20);
+  const got = [];
+  for (let i = 0; i < urls.length; i += 5)
+    got.push(...(await Promise.all(urls.slice(i, i + 5).map(async (u) => {
+      const r = await fetchFollow(u, { timeout: 10000 });
+      if (!r.ok) return null;
+      const d = load(r.text);
+      let can = "";
+      try { can = new URL(d('link[rel="canonical"]').attr("href") || "", r.url).href; } catch {}
+      return { url: r.url, canonical: can, title: norm(d("title").first().text()), desc: norm(d('meta[name="description"]').attr("content")) };
+    }))));
+  // 같은 페이지의 다른 주소(리다이렉트 도착지, / 와 /index.php, canonical 이 같은 주소)는 하나로 센다.
+  const key = (p) => stripSlash(p.canonical || p.url).replace(/\/index\.(php|html?|jsp|aspx?)$/i, "");
+  return [...new Map(got.filter(Boolean).map((p) => [key(p), p])).values()];
+}
+
+// 메인 페이지 중복 주소(메인 · 소개 유형만): 흔한 별칭(/index.php, /main …)과 메인 안 링크 중 index · main · home 으로 끝나는 주소를 연다.
+// 리다이렉트 없이 200 으로 메인과 같은 title 을 내면 같은 메인이 두 주소로 열리는 것. canonical 이 메인(/)을 가리키면 문제 없음으로 본다.
+async function homeAliases() {
+  if (!HOME) return null;
+  const cands = new Set(["/index.php", "/index.html", "/index.htm", "/index.jsp", "/index.asp", "/main", "/main.php", "/main.html", "/main.do", "/home"].map((p) => origin + p));
+  $("a[href]").each((_, a) => {
+    try { const u = new URL($(a).attr("href"), page.url); if (u.origin === origin && u.pathname !== "/" && /\/(index|main|home)(\.[a-z]+)?\/?$/i.test(u.pathname)) cands.add(u.origin + u.pathname); } catch {}
+  });
+  const homeTitle = norm($("title").first().text());
+  const out = [];
+  await Promise.all([...cands].slice(0, 15).map(async (u) => {
+    const r = await fetchFollow(u, { timeout: 10000 });
+    if (r.hops.length || !r.ok) return; // 리다이렉트 · 404 면 정상
+    const d = load(r.text);
+    if (!homeTitle || norm(d("title").first().text()) !== homeTitle) return; // 다른 페이지
+    let can = "";
+    try { can = new URL(d('link[rel="canonical"]').attr("href") || "", r.url).href; } catch {}
+    out.push({ url: u, canonicalToHome: !!can && stripSlash(can) === stripSlash(origin + "/") });
+  }));
+  return out;
+}
+
 console.error("▶ robots.txt · sitemap · llms.txt · AI 봇 응답 · 렌더링 비교 수집 중…");
 // HTTP 주소가 HTTPS 로 보내는지는 첫 응답만 본다. 80 포트가 닫혀 있으면(null) 중복 주소가 없으니 정상으로 친다.
 const httpProbe = () => fetch(`http://${finalUrl.host}${finalUrl.pathname}${finalUrl.search}`, { redirect: "manual", signal: AbortSignal.timeout(10000), headers: { "user-agent": BROWSER_UA } })
   .then((r) => { r.body?.cancel().catch(() => {}); return { status: r.status, location: r.headers.get("location") || "" }; }, () => null);
-const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes, krProbes] = await Promise.all([
+const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes, krProbes, sampled, aliases] = await Promise.all([
   fetchFollow(origin + "/llms.txt"),
   fetchFollow(origin + "/llms-full.txt"),
   fetchFollow(origin + "/ai.txt"),
@@ -365,6 +415,8 @@ const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes,
   renderedText(page.url),
   finalUrl.protocol === "https:" ? tlsProbe(finalUrl.hostname, Number(finalUrl.port) || 443) : Promise.resolve(null),
   probeBots(KR_BOTS),
+  samplePages(),
+  homeAliases(),
 ]);
 // Lighthouse 는 CPU 를 나눠 쓰면 TBT 가 부풀어 점수가 크게 떨어지므로 다른 수집이 끝난 뒤 단독으로 돌린다.
 console.error(`▶ Lighthouse (${opts.desktop ? "데스크톱" : "모바일"}) 측정 중…`);
@@ -546,7 +598,9 @@ const CRITERIA = {
   dates: "게시일 · 갱신일",
   freshness: "12개월 이내",
   length: "1,500어절 이상",
-  title: "1개, 15 ~ 60자",
+  title: "1개, 60자 이하",
+  "title-unique": "사이트맵 페이지 title 모두 다름",
+  "home-duplicate": "루트에서 넘기지 않음, 별칭은 메인으로 리다이렉트",
   "meta-description": "1개, 50 ~ 160자",
   canonical: "절대 URL 자기 참조 1개",
   lang: "lang 속성",
@@ -872,15 +926,35 @@ add(S.evidence, "length", "본문 분량", 1,
 }
 
 // 5. 제목 · 메타 · 표준 URL
+// 개선 문구는 판정 이유마다 다르게 쓴다(일반 안내 한 줄을 모든 경우에 붙이지 않는다). 통과면 빈 문자열.
+// title 은 최소 길이를 보지 않는다(Google 에 하한 기준이 없음). 무엇을 하는 곳인지 설명하는지는 intro-snippet 이 본다.
 add(S.meta, "title", "title 태그", 3,
-  !title ? "fail" : headerText.length > 1 ? "warn" : title.length >= 15 && title.length <= 60 ? "pass" : "warn",
+  !title ? "fail" : headerText.length > 1 || title.length > 60 ? "warn" : "pass",
   !title ? "title 없음" : `“${title}”${headerText.length > 1 ? `. title ${headerText.length}개 출력` : ""}`,
-  "페이지마다 고유한 title 1개, 핵심 키워드를 앞에, 사이트명은 뒤에. 표시 폭 약 600px(한글 약 30자, 영문 약 60자)을 넘으면 잘립니다.",
+  !title ? "title 태그가 없습니다. 페이지 내용을 설명하는 title 을 넣으세요."
+    : headerText.length > 1 ? `title 태그가 ${headerText.length}개 출력됩니다. 하나만 남기세요.`
+    : title.length > 60 ? `${title.length}자라 검색 결과에서 뒤가 잘립니다(표시 폭 약 600px, 한글 약 30자). 핵심 키워드를 앞에 두고 줄이세요.` : "",
   title ? `${title.length}자${headerText.length > 1 ? `, ${headerText.length}개` : ""}` : "없음");
+{
+  // 사이트맵 페이지들의 title 이 서로 겹치는지. 3쪽 미만이면 비교할 수 없어 해당 없음.
+  const byTitle = {};
+  sampled.filter((p) => p.title).forEach((p) => (byTitle[p.title] ||= []).push(p.url));
+  const n = Object.values(byTitle).flat().length;
+  const dups = Object.entries(byTitle).filter(([, us]) => us.length > 1).sort((a, b) => b[1].length - a[1].length);
+  const dupN = dups.reduce((a, [, us]) => a + us.length, 0);
+  add(S.meta, "title-unique", "페이지별 title 고유성", 2,
+    n < 3 ? "na" : dupN === 0 ? "pass" : dupN < n / 2 ? "warn" : "fail",
+    n < 3 ? `사이트맵에서 읽은 페이지가 ${n}개라 비교하지 않음` : dupN === 0 ? `사이트맵 페이지 ${n}개의 title 이 모두 다름` : `사이트맵 페이지 ${n}개 중 ${dupN}개가 같은 title 을 씀: ${dups.slice(0, 3).map(([t, us]) => `“${t}” ${us.length}개`).join(", ")}${dups.length > 3 ? ` 외 ${dups.length - 3}종` : ""}`,
+    n >= 3 && dupN ? "같은 title 을 쓰는 페이지는 검색 결과에서 구분되지 않고, 검색엔진이 대표 페이지 하나만 남길 수 있습니다. 페이지마다 그 페이지 내용을 담은 title 을 쓰세요." : "",
+    n < 3 ? "비교 불가" : `${n - dupN}/${n} 고유`);
+}
 add(S.meta, "meta-description", "meta description", 2,
   descs.length === 0 || !descs[0] ? "fail" : descs.length > 1 ? "warn" : descs[0].length >= 50 && descs[0].length <= 160 ? "pass" : "warn",
   descs[0] ? `“${descs[0]}”${descs.length > 1 ? `. ${descs.length}개 중복 출력` : ""}` : "meta description 없음",
-  "페이지 내용을 50 ~ 160자로 요약한 고유 문장 1개. 순위 요인은 아니지만 스니펫과 클릭률에 영향합니다.",
+  descs.length === 0 || !descs[0] ? "meta description 이 없습니다. 페이지 내용을 50 ~ 160자로 요약한 문장 1개를 넣으세요. 순위 요인은 아니지만 검색 결과 요약과 클릭률에 영향합니다."
+    : descs.length > 1 ? `meta description 이 ${descs.length}개 출력됩니다. 하나만 남기세요.`
+    : descs[0].length < 50 ? `${descs[0].length}자로 짧아 검색 결과 요약으로 쓰기에 정보가 부족합니다. 50 ~ 160자로 늘리세요.`
+    : descs[0].length > 160 ? `${descs[0].length}자라 검색 결과에서 잘립니다. 160자 안으로 줄이세요.` : "",
   descs[0] ? `${descs[0].length}자${descs.length > 1 ? `, ${descs.length}개` : ""}` : "없음");
 {
   const can = canonicals[0] ? toAbs(canonicals[0]) : null;
@@ -888,8 +962,34 @@ add(S.meta, "meta-description", "meta description", 2,
   add(S.meta, "canonical", "표준 URL (canonical)", 3,
     canonicals.length === 0 ? "fail" : canonicals.length > 1 ? "warn" : !/^https?:\/\//i.test(canonicals[0]) ? "warn" : self ? "pass" : "warn",
     canonicals.length === 0 ? "canonical 없음" : canonicals[0],
-    "절대 URL 로 자기 자신을 가리키는 canonical 1개. https/www 변형, 사이트맵, 리다이렉트와 같은 URL 을 쓰세요.",
+    canonicals.length === 0 ? "canonical 이 없습니다. 이 페이지 주소를 https:// 로 시작하는 절대 URL 로 가리키는 canonical 1개를 넣으세요."
+      : canonicals.length > 1 ? `canonical 이 ${canonicals.length}개라 서로 충돌합니다. 하나만 남기세요.`
+      : !/^https?:\/\//i.test(canonicals[0]) ? "상대 경로입니다. https:// 로 시작하는 절대 URL 로 바꾸세요."
+      : !self ? `다른 주소를 가리킵니다. 이 페이지가 대표 페이지라면 자기 주소(${page.url})로 바꾸세요.` : "",
     canonicals.length === 0 ? "없음" : canonicals.length > 1 ? `${canonicals.length}개 충돌` : self ? "자기 참조" : "다른 URL");
+}
+if (aliases) {
+  // 1) 프론트 리다이렉트: 루트가 200 으로 열린 뒤 JS · meta refresh 로 다른 주소로 넘어가면, 루트와 실제 메인 두 주소가 공존한다.
+  //    JS 를 실행하지 않는 크롤러는 루트에서 빈 페이지만 본다. Chrome 이 없으면 원본 HTML 의 meta refresh 만 본다.
+  const refresh = ($('meta[http-equiv="refresh" i]').attr("content") || "").match(/url\s*=\s*['"]?([^'";]+)/i)?.[1];
+  let front = null;
+  try {
+    const to = rendered.finalUrl ? new URL(rendered.finalUrl) : refresh ? new URL(refresh, page.url) : null;
+    if (to && stripSlash(to.origin + to.pathname + to.search) !== stripSlash(finalUrl.origin + finalUrl.pathname + finalUrl.search)) front = to.href;
+  } catch {}
+  // 2) 별칭 주소: /index.php 등이 리다이렉트 없이 같은 메인을 200 으로 냄(메인 canonical 이 있으면 문제 없음)
+  const dup = aliases.filter((a) => !a.canonicalToHome), ok = aliases.filter((a) => a.canonicalToHome);
+  const path = (u) => new URL(u).pathname;
+  const parts = [
+    front && `루트(${finalUrl.pathname})가 200 으로 열린 뒤 화면에서 ${front} 로 넘어감(프론트 리다이렉트)`,
+    dup.length && `메인과 같은 페이지가 다른 주소로도 열림: ${dup.map((a) => path(a.url)).join(", ")} (리다이렉트 · 메인 canonical 없음)`,
+    ok.length && `${ok.map((a) => path(a.url)).join(", ")} 은 canonical 로 메인을 가리켜 문제 없음`,
+  ].filter(Boolean);
+  add(S.meta, "home-duplicate", "메인 페이지 중복 주소", 2, front ? "fail" : dup.length ? "warn" : "pass",
+    parts.join(". ") || "별칭 주소(/index.php, /main 등)가 메인으로 리다이렉트되거나 열리지 않고, 루트에서 다른 주소로 넘어가지 않음",
+    [front && `루트에서 화면 스크립트로 넘기지 말고 서버에서 301 리다이렉트하거나, 루트에서 메인 내용을 바로 보여 주세요. JavaScript 를 실행하지 않는 크롤러는 루트에서 빈 페이지만 봅니다.`,
+     dup.length && `${dup.map((a) => path(a.url)).join(", ")} 를 메인(/)으로 301 리다이렉트하세요. 어렵다면 그 페이지의 canonical 을 ${origin}/ 로 지정하세요. 같은 메인이 두 주소로 색인되면 링크 · 평가가 나뉩니다.`].filter(Boolean).join(" "),
+    front ? "프론트 리다이렉트" : dup.length ? `${dup.length}개 중복` : "중복 없음");
 }
 add(S.meta, "lang", "html lang 속성", 1, htmlLang ? "pass" : "fail", htmlLang ? `<html lang="${htmlLang}">` : "lang 없음", "<html lang=\"ko\"> 처럼 문서 언어를 선언하세요.", htmlLang || "없음");
 {
@@ -1123,28 +1223,8 @@ async function wikidataLookup() {
 }
 async function buildLlmsDraft() {
   if (llmsOk) return null;
-  const locs = (xml) => [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1].replace(/&amp;/g, "&"));
-  let xml = sitemapXml;
-  if (/<sitemapindex/i.test(xml)) {
-    const subs = locs(xml);
-    const pick = subs.find((u) => /page/i.test(u)) || subs.find((u) => /post/i.test(u)) || subs[0];
-    xml = pick ? (await fetchFollow(pick, { timeout: 15000 })).text || "" : "";
-  }
-  const sameHost = (u) => { try { return new URL(u).hostname.replace(/^www\./, "") === host; } catch { return false; } };
-  // 계정 · 결제 같은 기능 페이지는 LLM 에게 안내할 문서가 아니다.
-  const utility = /\/(log-?in|log-?out|sign-?(in|up)|join|register|modify|my-?(account|page)|cart|checkout|wp-[a-z]+)(\/|$)/i;
-  const urls = [...new Set([origin + "/", ...locs(xml)])].filter((u) => sameHost(u) && !utility.test(new URL(u).pathname)).slice(0, 20);
-  const got = [];
-  for (let i = 0; i < urls.length; i += 5)
-    got.push(...(await Promise.all(urls.slice(i, i + 5).map(async (u) => {
-      const r = await fetchFollow(u, { timeout: 10000 });
-      if (!r.ok) return null;
-      const d = load(r.text);
-      // 제목 끝의 “ | 브랜드명” 은 목록에서 반복되므로 뗀다.
-      const t = norm(d("title").first().text()), cut = t.replace(/\s*[|\-–—·]\s*[^|\-–—·]+$/, "");
-      return { url: r.url, title: cut && t.endsWith(brandName) ? cut : t, desc: norm(d('meta[name="description"]').attr("content")) };
-    }))));
-  const ok = got.filter((p) => p?.title);
+  // 제목 끝의 “ | 브랜드명” 은 목록에서 반복되므로 뗀다.
+  const ok = sampled.filter((p) => p.title).map((p) => { const cut = p.title.replace(/\s*[|\-–—·]\s*[^|\-–—·]+$/, ""); return { ...p, title: cut && p.title.endsWith(brandName) ? cut : p.title }; });
   if (!ok.length) return null;
   const groups = {};
   for (const p of ok) {

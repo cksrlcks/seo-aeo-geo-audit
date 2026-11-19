@@ -177,10 +177,20 @@ export function reviewScores(v) {
     platform: v.platforms?.length ? Math.round(v.platforms.reduce((a, p) => a + p.score, 0) / v.platforms.length) : null,
   };
 }
-// 포털 검색 화면 기록: 통합 검색의 공식 사이트 순위와 탭별 브랜드 키워드 결과 수(첫 화면, 최대 15)
-const portalCell = (p) => !p?.total?.ok ? stText("neutral", "확인 불가")
-  : `${p.total.officialRank ? stText("pass", `공식 사이트 ${p.total.officialRank}번째`) : stText("neutral", "공식 사이트 없음")}<span class="sub">${[["news", "뉴스"], ["blog", "블로그"], ["cafe", "카페"]].map(([k, l]) => `${l} ${p[k]?.ok ? `${p[k].items.length}건` : "확인 불가"}`).join(", ")} (브랜드 키워드가 든 첫 화면 결과, 동명 결과 포함)</span>`;
-const wikiCell = (w) => (!w?.checked ? stText("neutral", "조회 실패") : w.found ? `${stText("pass", "있음")}<span class="sub">${esc(w.title || w.id || "")}${w.description ? ` · ${esc(w.description)}` : ""}</span>` : `${stText("neutral", "없음")}${w.note ? `<span class="sub">${esc(w.note)}</span>` : ""}`);
+// 브랜드 언급 표의 "조회 기록" 줄: 스크립트가 연 화면(네이버 · 나무위키 · YouTube · 위키 API)과
+// 판단 평가 때 Claude 가 실제 브라우저로 본 구글 화면(review.brand.google). 뉴스 · 커뮤니티 · LinkedIn 은 웹 검색이라 기록 줄이 없다.
+function brandRecords(b, v) {
+  const s = b.search || {}, n = s.naver, y = s.youtube, ns = s.namu, g = v?.brand?.google;
+  const has = (w) => (!w?.checked ? "조회 실패" : w.found ? "있음" : "없음");
+  return {
+    네이버: !n ? "" : !n.total?.ok ? "확인 불가(차단 화면 · 오류)"
+      : `공식 사이트 ${n.total.officialRank ? `${n.total.officialRank}번째` : "없음"}, ${[["news", "뉴스"], ["blog", "블로그"], ["cafe", "카페"]].map(([k, l]) => `${l} ${n[k]?.ok ? `${n[k].items.length}건` : "확인 불가"}`).join(" · ")} (브랜드 키워드가 든 첫 화면 결과, 동명 결과 포함)`,
+    구글: !g ? (v ? "" : "판단 평가 때 실제 브라우저로 확인") : !g.checked ? `확인 불가${g.note ? `: ${g.note}` : ""}`
+      : `공식 사이트 ${g.officialRank ? `${g.officialRank}번째` : "없음"}, 하위 링크 ${g.sitelinks ? "있음" : "없음"}, 비즈니스 프로필 ${g.panel}, Google 리뷰 ${g.reviews}개, AI 개요 ${g.aiOverview ? "표시" : "없음"} (실제 Chrome, ${g.loggedIn ? "로그인" : "로그아웃"} 상태)`,
+    위키: `나무위키 ${!ns ? "조회 안 함" : !ns.ok ? "확인 불가" : ns.found ? `있음(${ns.doc || ns.title}${ns.via ? `, ${ns.via}` : ""})` : "없음"}, 위키백과 한국어 ${has(b.wikipedia?.ko)} · 영어 ${has(b.wikipedia?.en)}, Wikidata ${has(b.wikidata)}`,
+    YouTube: !y ? "" : !y.ok ? "확인 불가(차단 화면 · 오류)" : `채널 ${y.channels.length}개 · 영상 ${y.videos.length}개${y.channels.length ? ` (${y.channels.slice(0, 2).map((c) => c.name).join(", ")})` : ""}`,
+  };
+}
 
 const chapter = (id, label, blocks, { pageBreak = true, kind = "" } = {}) =>
   `<section class="chapter" data-id="${id}" data-label="${esc(label)}"${pageBreak ? ' data-break="page"' : ""}${kind ? ` data-kind="${kind}"` : ""}>\n${blocks.filter(Boolean).join("\n")}\n</section>`;
@@ -354,26 +364,24 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
   const aiReview = chapter("ai", `${aiNum}  브랜드 · AI 판단 평가`, [
     secHead({
       num: aiNum, title: "브랜드 · AI 판단 평가", cat: "참고", q: "외부 브랜드 언급, E-E-A-T, AI 플랫폼별 준비도",
-      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 · YouTube 조회와 공식 채널 수집은 스크립트가 하고, 채점과 E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
+      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 · YouTube 조회와 공식 채널 수집은 스크립트가 하고, 구글 검색 확인과 채점, E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
     }),
     rv ? statCards([scoreStat(rv.brand, "브랜드 언급"), scoreStat(rv.eeat, "E-E-A-T"), scoreStat(rv.platform, "AI 플랫폼 준비도"), scoreStat(cite?.score ?? null, "문단 인용 가능성")]) : "",
-    `<h3>위키 · 포털 검색 · 공식 채널 (자동 조회)</h3>`,
-    table(["36mm", ""], ["항목", "결과"], [
-      ["위키백과 (한국어)", wikiCell(b.wikipedia?.ko)],
-      ["위키백과 (영어)", wikiCell(b.wikipedia?.en)],
-      ["Wikidata", wikiCell(b.wikidata)],
-      ...(b.search ? [
-        ["네이버 검색", portalCell(b.search.naver)],
-        ["나무위키", !b.search.namu.ok ? stText("neutral", "확인 불가") : b.search.namu.found ? `${stText("pass", "있음")}<span class="sub">${esc(b.search.namu.doc || b.search.namu.title)}${b.search.namu.via ? ` (${esc(b.search.namu.via)})` : ""}</span>` : stText("neutral", "없음")],
-        ...(b.search.youtube ? [["YouTube 검색", !b.search.youtube.ok ? stText("neutral", "확인 불가") : `채널 ${b.search.youtube.channels.length}개 · 영상 ${b.search.youtube.videos.length}개${b.search.youtube.channels.length ? `<span class="sub">${b.search.youtube.channels.slice(0, 2).map((c) => esc(c.name)).join(", ")}</span>` : ""}`]] : []),
-      ] : []),
-      ["공식 채널", b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : stText("neutral", "sameAs · 페이지 링크에서 찾지 못함")],
-    ].map(([k, x]) => `<tr><th>${k}</th><td>${x}</td></tr>`), "tbl tbl--kv"),
-    `<p class="caption">위키 문서는 이름이 정확히 같은 문서만 찾습니다. 네이버 · 나무위키 · YouTube 는 Chrome 으로 직접 연 화면을 기록한 것이라 동명 회사 결과가 섞일 수 있으니 아래 Claude 확인 결과와 함께 보세요.</p>`,
+    // 브랜드 언급 한 표: 플랫폼마다 Claude 확인 결과(점수 근거) + 조회 기록 + 점수. 판단 평가 전이면 조회 기록만.
+    `<h3>브랜드 언급</h3>`,
+    (() => {
+      const rec = brandRecords(b, v);
+      const items = v ? v.brand.items : REVIEW_BRAND.map(([platform, weight]) => ({ platform, weight }));
+      const rows = items.map((i) => {
+        const r = rec[i.platform];
+        return `<tr><td>${esc(i.platform)}</td><td>${i.found ? esc(i.found) : '<span class="muted">판단 평가 전</span>'}${r ? `<span class="sub">조회 기록 : ${esc(r)}</span>` : ""}${i.url ? `<span class="sub">${esc(i.url)}</span>` : ""}</td><td class="nowrap">${i.score == null ? '<span class="muted">–</span>' : `<b>${i.score}</b><span class="of"> / ${i.weight}</span>`}</td></tr>`;
+      });
+      rows.push(`<tr><td>공식 채널</td><td>${b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : '<span class="muted">sameAs · 페이지 링크에서 찾지 못함</span>'}</td><td></td></tr>`);
+      return table(["34mm", "", "22mm"], ["플랫폼", "확인 결과 · 조회 기록", "점수"], rows);
+    })(),
+    `<p class="caption">조회 기록은 스크립트가 Chrome 으로 직접 연 화면(네이버 · 나무위키 · YouTube)과 위키 API 결과이며 동명 회사 결과가 섞일 수 있습니다. 구글은 자동화 브라우저를 막아 판단 평가 때 Claude 가 실제 Chrome 으로 연 화면을 기록했습니다. 점수는 같은 실체로 확인한 결과만 셉니다.</p>`,
     ...(v
       ? [
-          `<h3>브랜드 언급 (검색 확인)</h3>`,
-          table(["34mm", "", "22mm"], ["플랫폼", "확인 결과", "점수"], v.brand.items.map((i) => `<tr><td>${esc(i.platform)}</td><td>${esc(i.found)}${i.url ? `<span class="sub">${esc(i.url)}</span>` : ""}</td><td class="nowrap"><b>${i.score}</b><span class="of"> / ${i.weight}</span></td></tr>`)),
           `<h3>E-E-A-T</h3>`,
           table(["34mm", "", "22mm"], ["항목", "근거 · 개선", "점수"], v.eeat.map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(e.evidence)}${e.fix ? `<span class="fix"><b>개선 :</b>${esc(e.fix)}</span>` : ""}</td><td class="nowrap"><b>${e.score}</b><span class="of"> / 25</span></td></tr>`)),
           `<h3>AI 플랫폼별 준비도</h3>`,

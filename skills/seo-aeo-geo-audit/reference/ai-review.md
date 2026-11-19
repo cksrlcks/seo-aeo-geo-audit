@@ -38,7 +38,8 @@
   - 그래도 없으면 웹 검색으로 다른 문서명을 한 번 찾아본다.
 - `brand.search.youtube`: YouTube 검색 결과 화면.
   - `channels`: 채널 결과(`name` · `href` · `meta` 구독자 수), 최대 5
-  - `videos`: 영상 결과(`title` · `href` · `channel` · `channelHref` · `meta` 조회수 · 올린 시점), 최대 15
+  - `videos`: 영상 결과(`title` · `href` · `channel` · `channelHref` · `context` 카드 문구: 조회수 · 올린 시점 · 설명 앞부분), 최대 15
+  - YouTube 화면 구성은 실행마다 바뀐다. `videos` · `channels` 가 비었는데 `text` 에 영상 제목 · 채널명이 보이면 `text` 로 판단한다.
 - 탭이 `ok: false`(차단 화면 · 오류)일 때만 웹 검색으로 대신 확인한다. 그래도 안 되면 0점 + "확인 불가".
 
 | platform | weight | 세부 배점 | 확인 방법 |

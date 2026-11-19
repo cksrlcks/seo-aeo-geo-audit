@@ -6,7 +6,8 @@
 import { readFileSync } from "node:fs";
 
 const CSS = readFileSync(new URL("./report.css", import.meta.url), "utf8");
-const FONT_URL = "https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/static/pretendard-dynamic-subset.min.css";
+// Wanted Sans 가변 글꼴(굵기 400 ~ 1000, 300 은 400 으로 보인다). 한글 · 영문 한 서체, 쓰는 글자만 받는 분할 파일
+const FONT_URL = "https://cdn.jsdelivr.net/gh/wanteddev/wanted-sans@v1.0.3/packages/wanted-sans/fonts/webfonts/variable/split/WantedSansVariable.min.css";
 const TITLE = "SEO · AEO · GEO 점검 보고서";
 
 const esc = (s) =>
@@ -84,18 +85,18 @@ const GLOSSARY = [
 const BULB = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>';
 // 섹션 머리: 번호 · 제목 · 부제, 오른쪽 점수 블록(한눈에 보기 종합 점수와 같은 구성), 아래 남색 2px 선, 그 아래 설명.
 // scoreRows: [[라벨, 값, 톤]] — 점수표 왼쪽 칸에 가로로 나열(점수는 오른쪽 칸). 값이 0 이면 검정. rowsLabel 은 왼쪽 칸 머리.
-function secHead({ num = "", cat = "", title, q = "", score, scoreLabel = "섹션 점수", scoreRows = [], rowsLabel = "점검 결과", desc = "", note = "" }) {
+function secHead({ num = "", cat = "", title, q = "", score, scoreLabel = "섹션 점수", scoreRows = [], rowsLabel = "점검 결과", desc = "", note = "", line = true }) {
   const b = band(score);
   // 라벨은 판정색(참고는 검정), 값은 0 이 아니면 판정색 · 0 이거나 참고면 검정
   const items = scoreRows.map(([k, v, t]) => { const c = t === "neutral" ? "" : `tone-${t}`; return `<div><span class="${c}">${k}</span><b class="${v ? c : ""}">${v}</b></div>`; }).join("");
   const scoreBlock = score === undefined ? "" : `<div class="sec-score"><table class="grade"><thead><tr>${items ? `<th>${esc(rowsLabel)}</th>` : ""}<th class="grade-head-score">${esc(scoreLabel)}</th></tr></thead><tbody><tr>${items ? `<td class="grade-items"><div class="grade-list">${items}</div></td>` : ""}<td class="grade-score"><b>${score ?? "–"}</b><span class="tone-${b.tone}">${b.label}</span></td></tr></tbody></table></div>`;
-  return `<header class="sec-head">
+  return `<header class="sec-head${line ? "" : " sec-head--plain"}">
 <div class="sec-top"><div class="sec-title">${num ? `<p class="sec-num">${esc(num)}</p>` : ""}<h2>${esc(title)}${cat ? `<span class="sec-cat">${esc(cat)} 영역</span>` : ""}</h2>${q ? `<p class="sec-q">${esc(q)}</p>` : ""}</div>${scoreBlock}</div>
 ${desc ? `<p class="sec-desc">${desc}</p>` : ""}${note ? `<div class="sec-note">${BULB}<p>${esc(note)}</p></div>` : ""}
 </header>`;
 }
 
-// 종합 점수 원형 차트: 판정 구간 두 색 원뿔 그라디언트(시작 밝게 → 끝 선명), 시작 · 끝은 둥글게, 끝에 흰 원 핸들. 가운데 점수만
+// 종합 점수 원형 차트: 판정 구간 두 색 원뿔 그라디언트(시작 밝게 → 끝 선명), 시작 · 끝은 둥글게. 가운데 점수만
 function ring(score, px = 132, label = "종합 점수") {
   const b = band(score);
   return `<div class="ring ring--${b.tone}" style="--p:${score ?? 0}; --size:${px}px" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">${score ? '<i class="ring-cap"></i><i class="ring-end"></i>' : ""}<span class="ring-num">${score ?? "–"}</span></div>`;
@@ -113,10 +114,10 @@ function scoreCard(r, detail) {
 <div class="score-cats">${cats.join("")}</div></div>`;
 }
 
-// 지표 카드. items: [값, 라벨, 톤, 단위]. 라벨은 검정, 숫자를 판정 색으로
+// 지표 카드. items: [값, 라벨, 톤, 단위, 뱃지]. 라벨 · 숫자는 검정, 뱃지가 있으면 숫자 아래에 판정 pill(톤 색)
 const statCards = (items) =>
-  `<div class="stats">${items.map(([v, label, tone, unit = ""]) => `<div class="stat stat--${tone}"><p class="stat-label">${esc(label)}</p><p class="stat-value">${esc(v)}${unit ? `<span>${esc(unit)}</span>` : ""}</p></div>`).join("")}</div>`;
-const scoreStat = (score, label) => [score ?? "–", label, band(score).tone, score == null ? "" : "/ 100"];
+  `<div class="stats">${items.map(([v, label, tone, unit = "", badge = ""]) => `<div class="stat"><p class="stat-label">${esc(label)}</p><p class="stat-value">${esc(v)}${unit ? `<span>${esc(unit)}</span>` : ""}</p>${badge ? `<span class="pill tone-${tone}">${esc(badge)}</span>` : ""}</div>`).join("")}</div>`;
+const scoreStat = (score, label) => { const b = band(score); return [score ?? "–", label, b.tone, score == null ? "" : "/ 100", b.label]; };
 
 const table = (cols, head, rows, cls = "tbl") =>
   `<table class="${cls}"><colgroup>${cols.map((w) => (w ? `<col style="width:${w}">` : "<col>")).join("")}</colgroup>
@@ -388,7 +389,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
 
   // 부록
   const appendix = chapter("appendix", "부록", [
-    secHead({ title: "부록", q: "점검 방법, 채점 기준, 참고 자료, 용어", note: "모든 항목과 기준은 고정되어 있어 다른 시점, 다른 페이지의 결과와 그대로 비교할 수 있습니다." }),
+    secHead({ title: "부록", q: "점검 방법, 채점 기준, 참고 자료, 용어", line: false }),
     `<h3>대상과 방법</h3>`,
     table(["30mm", ""], ["항목", "내용"], [
       ["입력 URL", esc(r.url)],
@@ -548,7 +549,12 @@ export function paginate() {
     if (pg) pg.textContent = `${i + 1} / ${sheets.length}`;
     const label = s.querySelector(".run-label");
     const first = s.querySelector(".sheet-body > [data-label]");
-    if (label && first) label.textContent = first.dataset.label;
+    if (label && first) {
+      // "01  AI 크롤러 접근" → 번호만 회색 span 으로
+      const [, num, rest] = first.dataset.label.match(/^(\d+)(\s.*)$/s) || [, "", first.dataset.label];
+      if (num) { const n = document.createElement("span"); n.className = "run-num"; n.textContent = num; label.append(n); }
+      label.append(rest);
+    }
   });
   const startPage = {};
   document.querySelectorAll("[data-start]").forEach((e) => (startPage[e.dataset.start] = sheets.indexOf(e.closest(".sheet")) + 1));

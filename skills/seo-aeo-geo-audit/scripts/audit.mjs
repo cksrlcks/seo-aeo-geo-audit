@@ -1223,16 +1223,30 @@ const namuAlt = search.naver.total.namuLink;
 if (search.namu.ok && search.namu.status === 404 && namuAlt && namuAlt !== namuFirst) search.namu = { ...(await browse(namuAlt)), tried: [namuFirst], via: "네이버 통합검색 링크" };
 search.namu.found = search.namu.ok ? search.namu.status === 200 : null; // 404 면 문서 없음
 search.namu.doc = search.namu.found ? search.namu.title.replace(/\s*-\s*나무위키\s*$/, "") : null; // 실제로 연 문서명(넘겨주기 반영)
-// YouTube: 검색 결과 화면에서 채널 · 영상 제목과 채널명을 추린다(제3자 영상 판단용). 스크립트로 그리는 화면이라 결과 요소를 기다린다.
+// YouTube: 검색 결과 화면에서 채널 · 영상 제목과 채널명을 추린다(제3자 영상 판단용). 스크립트로 그리는 화면이라 영상 링크가 뜰 때까지 기다린다.
+// 결과 레이아웃이 실행마다 바뀌어(ytd-video-renderer ↔ yt-lockup-view-model) 태그 대신 /watch?v= 링크로 영상 카드를 묶는다:
+// 링크에서 위로 올라가며 다른 영상 링크가 섞이기 직전 요소까지를 카드 하나로 본다.
 search.youtube = await browse(`https://www.youtube.com/results?search_query=${encodeURIComponent(brandName)}`, {
-  waitFor: "ytd-video-renderer, ytd-channel-renderer",
+  waitFor: "a[href*='/watch?v=']",
   extract: () => {
     const t = (s) => (s || "").replace(/\s+/g, " ").trim();
-    const href = (a) => a?.href?.replace(/[&?]pp=[^&]*/, "") || null;
-    return {
-      channels: [...document.querySelectorAll("ytd-channel-renderer")].slice(0, 5).map((r) => ({ name: t(r.querySelector("#channel-title")?.innerText), href: href(r.querySelector("a")), meta: t(r.querySelector("#metadata")?.innerText) })),
-      videos: [...document.querySelectorAll("ytd-video-renderer")].slice(0, 15).map((r) => ({ title: t(r.querySelector("#video-title")?.innerText), href: href(r.querySelector("a#video-title")), channel: t(r.querySelector("ytd-channel-name a")?.innerText), channelHref: href(r.querySelector("ytd-channel-name a")), meta: t(r.querySelector("#metadata-line")?.innerText) })),
-    };
+    const vid = (a) => { try { const u = new URL(a.href); return u.pathname === "/watch" && !u.searchParams.has("list") ? u.searchParams.get("v") : null; } catch { return null; } };
+    const CH = "a[href^='/@'], a[href^='/channel/'], a[href*='youtube.com/@'], a[href*='youtube.com/channel/']";
+    const videos = [], seen = new Set();
+    for (const a of document.querySelectorAll("a[href*='/watch?v=']")) {
+      const id = vid(a);
+      if (!id || seen.has(id)) continue;
+      let box = a;
+      while (box.parentElement && box.parentElement !== document.body && [...box.parentElement.querySelectorAll("a[href*='/watch?v=']")].every((x) => !vid(x) || vid(x) === id)) box = box.parentElement;
+      const title = t(box.querySelector("#video-title, h3")?.innerText) || t(a.getAttribute("title"));
+      if (!title) continue;
+      seen.add(id);
+      const ch = [...box.querySelectorAll(CH)].find((x) => t(x.innerText));
+      videos.push({ title: title.slice(0, 160), href: `https://www.youtube.com/watch?v=${id}`, channel: t(ch?.innerText).slice(0, 60), channelHref: ch?.href || null, context: t(box.innerText).slice(0, 200) });
+      if (videos.length >= 15) break;
+    }
+    const channels = [...document.querySelectorAll("ytd-channel-renderer")].slice(0, 5).map((r) => ({ name: t(r.querySelector("#channel-title")?.innerText), href: r.querySelector("a")?.href?.replace(/[&?]pp=[^&]*/, "") || null, meta: t(r.querySelector("#metadata")?.innerText) }));
+    return { channels, videos };
   },
 });
 const brand = { name: brandName, wikipedia: { ko: wikiKo, en: wikiEn }, wikidata, channels, search };

@@ -161,7 +161,7 @@ const CITE_PARTS = [
 ];
 const weakest = (p) => CITE_PARTS.reduce((w, c) => (p.parts[c[0]] / c[2] < p.parts[w[0]] / w[2] ? c : w));
 // review.json 의 고정 항목. reference/ai-review.md 의 표와 이름 · 순서 · weight 가 같아야 한다(render.mjs 가 검사).
-export const REVIEW_BRAND = [["네이버", 25], ["위키", 20], ["YouTube", 15], ["뉴스 · 업계 매체", 10], ["커뮤니티", 10], ["LinkedIn", 10]];
+export const REVIEW_BRAND = [["네이버", 25], ["구글", 25], ["위키", 20], ["YouTube", 15], ["뉴스 · 업계 매체", 10], ["커뮤니티", 10], ["LinkedIn", 10]];
 export const REVIEW_EEAT = ["경험", "전문성", "권위", "신뢰"];
 export const REVIEW_PLATFORMS = ["Google AI 오버뷰", "ChatGPT 검색", "Perplexity", "Gemini", "Copilot", "네이버 AI 브리핑"];
 // PDF 버퍼의 쪽 수
@@ -273,7 +273,10 @@ export function renderFlow(r) {
       }),
       checksTable(r.checks.filter((x) => x.section === s.name)),
       ...(s.name === "AI 크롤러 접근"
-        ? [`<h3>AI 크롤러별 판정</h3>`, botsTable(r.bots), `<p class="caption">학습용 봇의 차단은 정책 선택으로 보아 감점하지 않습니다. 검색 · 인용 · 사용자 요청용 봇이 차단되면 해당 서비스의 답변에 인용될 경로가 막히므로 감점합니다.</p>`]
+        ? [`<h3>AI 크롤러별 판정</h3>`,
+           // 국내 검색 봇(facts.koBots)은 검색 봇(Googlebot · Bingbot) 바로 다음에 보인다. 채점은 기술 기본 섹션의 kr-bots 항목.
+           botsTable([...r.bots.slice(0, 2), ...(r.facts?.koBots || []).map((b) => ({ ...b, citation: true })), ...r.bots.slice(2)]),
+           `<p class="caption">학습용 봇의 차단은 정책 선택으로 보아 감점하지 않습니다. 검색 · 인용 · 사용자 요청용 봇이 차단되면 해당 서비스의 답변에 인용될 경로가 막히므로 감점합니다.${r.facts?.koBots?.length ? " 네이버(Yeti) · 다음(Daumoa)은 기술 기본 섹션의 ‘국내 검색 봇 접근’ 항목에서 채점합니다." : ""}</p>`]
         : []),
     ]);
   });

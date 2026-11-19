@@ -42,16 +42,24 @@
   - YouTube 화면 구성은 실행마다 바뀐다. `videos` · `channels` 가 비었는데 `text` 에 영상 제목 · 채널명이 보이면 `text` 로 판단한다.
 - 탭이 `ok: false`(차단 화면 · 오류)일 때만 웹 검색으로 대신 확인한다. 그래도 안 되면 0점 + "확인 불가".
 
+**구글은 스크립트가 열 수 없다**(자동화 브라우저를 구글이 확인 화면 · HTTP 429 로 막는다). 판단 평가 때 Claude 가 **사람이 쓰는 실제 브라우저**로 직접 연다.
+- 도구: Claude in Chrome(`mcp__claude-in-chrome__*`) 또는 Claude 데스크톱 앱 내장 브라우저. 둘 다 없으면 구글 칸은 0점 + "확인 불가: 실제 브라우저 연결 없음". 웹 검색 · 스크립트 Chrome 으로 대신하지 않는다(순위 · 패널이 다르게 나온다).
+- 주소: `https://www.google.com/search?q=<brand.name>&hl=ko&gl=kr` 한 번만 연다. 새 탭을 만들어 열고, 다 보면 닫는다.
+- "비정상적인 트래픽" · 로그인 확인 화면이 뜨면 사용자에게 풀어 달라고 요청한다. 풀지 못하면 0점 + "확인 불가: 구글 확인 화면".
+- 화면에서 읽을 것: 검색 결과 제목 · 주소 순서(광고 제외), 공식 결과 아래 사이트 하위 링크, 오른쪽 패널(비즈니스 프로필 · 지식 패널: 이름 · 주소 · 전화 · "이 비즈니스의 소유주인가요?" 문구 · 리뷰 수), AI 개요 표시 여부.
+- `found` 끝에 "(로그인 상태)" 또는 "(로그아웃 상태)" 를 적는다. 로그인 상태는 검색 기록에 따른 개인화가 섞일 수 있다.
+
 | platform | weight | 세부 배점 | 확인 방법 |
 |---|---|---|---|
 | 네이버 | 25 | 공식 사이트 노출 10: `total.officialRank` 1 ~ 3 → 10, 4 ~ 10 → 5, 그 밖 0<br>정보 영역 5: 같은 실체의 지식백과 · 인물정보 · 기업 정보 · 플레이스 패널 있음 5, 없거나 다른 실체 0<br>뉴스 5: `news.items` 중 같은 실체 · 최근 2년 기사 0건 0 / 1 ~ 2건 2 / 3건 이상 5<br>블로그 · 카페 5: 공식 블로그 · 영업 · 광고 · 채용 글을 뺀 제3자 글 0건 0 / 1 ~ 2건 2 / 3건 이상 5 | `brand.search.naver` (`total.headings` · `text`, `news` · `blog` · `cafe` 의 `items`) |
+| 구글 | 25 | 공식 사이트 노출 10: 광고를 뺀 검색 결과 중 공식 사이트 1 ~ 3위 → 10, 4 ~ 10위 → 5, 그 밖 0<br>사이트 하위 링크 5: 공식 결과 아래 하위 페이지 링크(사이트링크) 묶음 있음 5, 없음 0<br>비즈니스 프로필 · 지식 패널 5: 같은 실체 패널이 있고 "이 비즈니스의 소유주인가요?" 문구가 없음(소유권 등록) 5 / 패널은 있으나 그 문구가 보임(미등록) 2 / 없거나 다른 실체 0<br>Google 리뷰 5: 같은 실체 패널의 리뷰 0개 0 / 1 ~ 9개 2 / 10개 이상 5 | 실제 브라우저로 연 구글 검색 화면(위 절차) |
 | 위키 | 20 | 나무위키 8, 위키백과(ko 또는 en) 8, Wikidata 4. 같은 실체 문서만 | `brand.search.namu`, `brand.wikipedia`, `brand.wikidata` |
 | YouTube | 15 | 공식 채널 7: 같은 실체의 공식 채널 있음 7, 없음 0<br>제3자 영상 8: 공식 채널 · 영업 · 광고 영상을 뺀 같은 실체 영상 0건 0 / 1 ~ 2건 4 / 3건 이상 8 | `brand.search.youtube` (`channels`, `videos` 의 `channel`), `brand.channels` |
 | 뉴스 · 업계 매체 | 10 | 최근 2년 안의 같은 실체 기사 0건 0 / 1 ~ 2건 5 / 3건 이상 10 | 웹 검색, `brand.search.naver.news` |
 | 커뮤니티 | 10 | Reddit · 국내 커뮤니티 · 지식iN 의 제3자 질문 · 추천 글(영업 · 광고 글 제외) 0건 0 / 1 ~ 2건 5 / 3건 이상 10 | 웹 검색 `site:reddit.com <브랜드>`, `brand.search.naver.cafe` 의 이용자 글 |
 | LinkedIn | 10 | 회사 페이지 5: 있음 5, 없음 0<br>활동 5: 최근 1년 게시물 보임 5 / 게시물은 없지만 팔로워 · 직원 연결 표시 2 / 그 밖 0 | 웹 검색 `site:linkedin.com/company <브랜드>` |
 
-`brand.items` 는 위 6개를 이 순서 · 이 `platform` 이름 · 이 `weight` 로 모두 쓴다. `score` 는 세부 배점의 합(0 ~ weight). `found` 에 세부 배점별 근거를 짧게 쓴다. 예: "공식 사이트 1위(10), 정보 영역 없음(0), 뉴스 3건(5), 제3자 블로그 1건(2)". 배점 합 90 을 보고서가 100점으로 환산한다. 다음(Daum) 검색은 확인하지 않는다.
+`brand.items` 는 위 7개를 이 순서 · 이 `platform` 이름 · 이 `weight` 로 모두 쓴다. `score` 는 세부 배점의 합(0 ~ weight). `found` 에 세부 배점별 근거를 짧게 쓴다. 예: "공식 사이트 1위(10), 정보 영역 없음(0), 뉴스 3건(5), 제3자 블로그 1건(2)". 배점 합 115 를 보고서가 100점으로 환산한다(1.7.0 부터. 그 전 보고서는 구글 칸 없이 90 기준이라 점수를 그대로 비교하지 않는다). 다음(Daum) 검색은 확인하지 않는다.
 
 ## 2. E-E-A-T (4 × 25 = 100점)
 
@@ -82,7 +90,7 @@
 | Google AI 오버뷰 | Googlebot 허용 · noindex 없음 · SSR | 소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-sentence`<br>목록 · 본문 텍스트 10 `lists-tables / service-text` | 페이지 유형 스키마 10 `ld-content-type`<br>엔티티 · sameAs 10 `ld-entity`<br>저자 · 날짜 10: 콘텐츠는 `author` · `dates` 둘 다 통과 10, 하나 5, 없음 0 / 메인은 `org-details` |
 | ChatGPT 검색 | OAI-SearchBot · ChatGPT-User 허용, bot-probe 정상 | 출처 붙은 수치 10 `sourced-stats / intro-sentence`<br>외부 출처 링크 10 `outbound-sources / service-text`<br>즉답 10 `direct-answer / intro-snippet` | 위키백과 10: `brand.wikipedia` ko 또는 en 같은 실체 문서 있음 10, 없음 0<br>Wikidata 10: `brand.wikidata` 같은 실체 있음 10, 없음 0<br>sameAs 10 `ld-entity` |
 | Perplexity | PerplexityBot · Perplexity-User 허용 | 즉답 10 `direct-answer / intro-sentence`<br>수치 10: 콘텐츠는 `sourced-stats` / 메인은 본문에 수치(연도 · 규모 · 가격 등) 문장 3개 이상 10, 1 ~ 2개 5, 없음 0<br>목록 · 소제목 10 `lists-tables / section-headings` | 커뮤니티 언급 15: 브랜드 언급 `커뮤니티` 점수 10 → 15, 5 → 8, 0 → 0<br>최신 갱신 15 `freshness / site-freshness` (주의 7) |
-| Gemini | Googlebot 허용(Google-Extended 차단은 감점 없음) | Google AI 오버뷰의 내용 구조 점수를 그대로 쓴다 | Organization · sameAs 10 `ld-entity`<br>YouTube 10: 공식 채널 있음 5 + 제3자 영상 1건 이상 5 (브랜드 언급 YouTube 칸과 같은 근거)<br>Google 비즈니스 프로필 10: 웹 검색으로 같은 실체 프로필 · 지도 결과를 확인하면 10, 아니면 0 |
+| Gemini | Googlebot 허용(Google-Extended 차단은 감점 없음) | Google AI 오버뷰의 내용 구조 점수를 그대로 쓴다 | Organization · sameAs 10 `ld-entity`<br>YouTube 10: 공식 채널 있음 5 + 제3자 영상 1건 이상 5 (브랜드 언급 YouTube 칸과 같은 근거)<br>Google 비즈니스 프로필 10: 브랜드 언급 구글 칸에서 같은 실체 비즈니스 프로필 패널이 보이면 10, 아니면 0(실제 브라우저가 없으면 확인 불가 0) |
 | Copilot | Bingbot 허용 | 제목 · 메타 10: `title` · `meta-description` 둘 다 통과 10, 하나 5, 없음 0<br>소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-snippet` | LinkedIn 회사 페이지 10: 브랜드 언급 LinkedIn 의 페이지 5점이면 10, 아니면 0<br>사이트맵 10 `sitemap`<br>sameAs 10 `ld-entity` |
 | 네이버 AI 브리핑 | `facts.koBots` 의 Yeti 가 robots.txt 허용 · 실제 요청(`probe`) 2xx · 3xx, SSR | 소제목 10 `question-headings / section-headings`<br>즉답 10 `direct-answer / intro-sentence`<br>네이버 원문 10: `brand.search.naver` 블로그 · 카페에서 같은 실체 제3자 글(영업 · 광고 제외) 3건 이상 10, 1 ~ 2건 5, 없음 0 | 네이버 검색 노출 10: `total.officialRank` 1 ~ 3 → 10, 4 ~ 10 → 5, 그 밖 0<br>정보 영역 10: 브랜드 언급 네이버의 정보 영역 5점이면 10, 아니면 0<br>네이버 공식 채널 10: 같은 실체의 네이버 블로그 · 플레이스 · 스마트스토어 등 2개 이상 10, 1개 5, 없음 0 (`brand.channels`, `brand.search.naver`) |
 
@@ -112,8 +120,8 @@
 
 | 위치 | 필드 | 필수 | 규칙 |
 |---|---|---|---|
-| `brand.items[]` | `platform` | 필수 | 6개, 순서 · 이름 고정: "네이버", "위키", "YouTube", "뉴스 · 업계 매체", "커뮤니티", "LinkedIn" |
-| | `weight` | 필수 | 25 · 20 · 15 · 10 · 10 · 10 고정 |
+| `brand.items[]` | `platform` | 필수 | 7개, 순서 · 이름 고정: "네이버", "구글", "위키", "YouTube", "뉴스 · 업계 매체", "커뮤니티", "LinkedIn" |
+| | `weight` | 필수 | 25 · 25 · 20 · 15 · 10 · 10 · 10 고정 |
 | | `score` | 필수 | 0 ~ weight |
 | | `found` | 필수 | 빈 문자열 금지 |
 | | `url` | 선택 | 대표 근거 주소. 있으면 보고서에 작게 표시 |

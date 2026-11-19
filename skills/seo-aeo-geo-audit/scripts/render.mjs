@@ -34,18 +34,6 @@ function validateReview(v) {
       if (i.weight !== w) errs.push(`brand.items[${k}].weight: ${w} 이어야 합니다 (받은 값 ${JSON.stringify(i.weight)})`);
       str(i.found, `brand.items[${k}].found`); num(i.score, 0, w, `brand.items[${k}].score`); opt(i.url, `brand.items[${k}].url`);
     });
-  // 선택: 구글 검색 화면 기록(조회 기록 표의 "구글 검색" 행)
-  const g = v?.brand?.google;
-  if (g !== undefined && g !== null) {
-    if (typeof g.checked !== "boolean") errs.push("brand.google.checked: true 또는 false 여야 합니다");
-    else if (!g.checked) opt(g.note, "brand.google.note");
-    else {
-      if (!(g.officialRank === null || (Number.isInteger(g.officialRank) && g.officialRank >= 1))) errs.push("brand.google.officialRank: 1 이상 정수 또는 null 이어야 합니다");
-      if (!["등록", "미등록", "없음"].includes(g.panel)) errs.push(`brand.google.panel: "등록" · "미등록" · "없음" 중 하나여야 합니다 (받은 값 ${JSON.stringify(g.panel)})`);
-      if (!(Number.isInteger(g.reviews) && g.reviews >= 0)) errs.push("brand.google.reviews: 0 이상 정수여야 합니다");
-      for (const k of ["sitelinks", "aiOverview", "loggedIn"]) if (typeof g[k] !== "boolean") errs.push(`brand.google.${k}: true 또는 false 여야 합니다`);
-    }
-  }
   if (names(v?.eeat, "name", REVIEW_EEAT, "eeat"))
     v.eeat.forEach((e, k) => { str(e.evidence, `eeat[${k}].evidence`); str(e.fix, `eeat[${k}].fix`); num(e.score, 0, 25, `eeat[${k}].score`); });
   if (names(v?.platforms, "name", REVIEW_PLATFORMS, "platforms"))

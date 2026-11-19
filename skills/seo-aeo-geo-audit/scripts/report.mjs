@@ -177,19 +177,47 @@ export function reviewScores(v) {
     platform: v.platforms?.length ? Math.round(v.platforms.reduce((a, p) => a + p.score, 0) / v.platforms.length) : null,
   };
 }
-// 브랜드 언급 표의 "조회 기록" 줄: 스크립트가 연 화면(네이버 · 나무위키 · YouTube · 위키 API)과
-// 판단 평가 때 Claude 가 실제 브라우저로 본 구글 화면(review.brand.google). 뉴스 · 커뮤니티 · LinkedIn 은 웹 검색이라 기록 줄이 없다.
-function brandRecords(b, v) {
-  const s = b.search || {}, n = s.naver, y = s.youtube, ns = s.namu, g = v?.brand?.google;
-  const has = (w) => (!w?.checked ? "조회 실패" : w.found ? "있음" : "없음");
+// 브랜드 언급 표의 "조회" 줄(판단 평가 전에만 보임): 스크립트가 연 화면(네이버 · 나무위키 · YouTube)과 위키 API.
+// 구글은 스크립트가 열 수 없어 판단 평가 때 확인한다고만 적는다. 뉴스 · 커뮤니티 · LinkedIn 은 웹 검색이라 조회 줄이 없다.
+// 반환값은 [항목 이름, 값 HTML] 목록. 값은 굵게 보이고, 좋은 값(순위 · 있음)은 초록.
+function brandRecords(b) {
+  const s = b.search || {}, n = s.naver, y = s.youtube, ns = s.namu;
+  const val = (t) => `<b>${esc(t)}</b>`, ok = (t) => stText("pass", t);
+  const has = (w) => (!w?.checked ? val("조회 실패") : w.found ? ok("있음") : val("없음"));
+  const rank = (r) => (r ? ok(`${r}번째`) : val("없음"));
+  const na = (why) => [["", val(`확인 불가(${why})`)]];
   return {
-    네이버: !n ? "" : !n.total?.ok ? "확인 불가(차단 화면 · 오류)"
-      : `공식 사이트 ${n.total.officialRank ? `${n.total.officialRank}번째` : "없음"}, ${[["news", "뉴스"], ["blog", "블로그"], ["cafe", "카페"]].map(([k, l]) => `${l} ${n[k]?.ok ? `${n[k].items.length}건` : "확인 불가"}`).join(" · ")} (브랜드 키워드가 든 첫 화면 결과, 동명 결과 포함)`,
-    구글: !g ? (v ? "" : "판단 평가 때 실제 브라우저로 확인") : !g.checked ? `확인 불가${g.note ? `: ${g.note}` : ""}`
-      : `공식 사이트 ${g.officialRank ? `${g.officialRank}번째` : "없음"}, 하위 링크 ${g.sitelinks ? "있음" : "없음"}, 비즈니스 프로필 ${g.panel}, Google 리뷰 ${g.reviews}개, AI 개요 ${g.aiOverview ? "표시" : "없음"} (실제 Chrome, ${g.loggedIn ? "로그인" : "로그아웃"} 상태)`,
-    위키: `나무위키 ${!ns ? "조회 안 함" : !ns.ok ? "확인 불가" : ns.found ? `있음(${ns.doc || ns.title}${ns.via ? `, ${ns.via}` : ""})` : "없음"}, 위키백과 한국어 ${has(b.wikipedia?.ko)} · 영어 ${has(b.wikipedia?.en)}, Wikidata ${has(b.wikidata)}`,
-    YouTube: !y ? "" : !y.ok ? "확인 불가(차단 화면 · 오류)" : `채널 ${y.channels.length}개 · 영상 ${y.videos.length}개${y.channels.length ? ` (${y.channels.slice(0, 2).map((c) => c.name).join(", ")})` : ""}`,
+    네이버: !n ? [] : !n.total?.ok ? na("차단 화면 · 오류")
+      : [["공식 사이트", rank(n.total.officialRank)], ...[["news", "뉴스"], ["blog", "블로그"], ["cafe", "카페"]].map(([k, l]) => [l, val(n[k]?.ok ? `${n[k].items.length}건` : "확인 불가")])],
+    구글: [["", val("판단 평가 때 실제 브라우저로 확인")]],
+    위키: [["나무위키", !ns ? val("조회 안 함") : !ns.ok ? val("확인 불가") : ns.found ? `${ok("있음")} ${esc(ns.doc || ns.title)}` : val("없음")],
+           ["위키백과 한국어", has(b.wikipedia?.ko)], ["영어", has(b.wikipedia?.en)], ["Wikidata", has(b.wikidata)]],
+    YouTube: !y ? [] : !y.ok ? na("차단 화면 · 오류")
+      : [["채널", y.channels.length ? `${ok(`${y.channels.length}개`)} ${esc(y.channels.slice(0, 2).map((c) => c.name).join(", "))}` : val("0개")], ["영상", val(`${y.videos.length}개`)]],
   };
+}
+
+// 브랜드 언급 세부 배점 이름(reference/ai-review.md 표의 순서). 보고서 세부 근거의 라벨이 된다.
+const BRAND_SUB = {
+  네이버: ["공식 사이트 노출", "정보 영역", "뉴스", "블로그 · 카페"],
+  구글: ["공식 사이트 노출", "사이트 하위 링크", "비즈니스 프로필", "Google 리뷰"],
+  위키: ["나무위키", "위키백과", "Wikidata"],
+  YouTube: ["공식 채널", "제3자 영상"],
+  "뉴스 · 업계 매체": ["기사 수"],
+  커뮤니티: ["제3자 글"],
+  LinkedIn: ["회사 페이지", "활동"],
+};
+// review 의 found("공식 사이트 1위(10), 정보 영역 없음(0), …")를 세부 배점별 [문구, 점수] 로 나눈다.
+// 구분은 "(숫자)" 뒤의 쉼표 · 마침표 · 가운뎃점 · 쌍점. 점수 조각이 없으면 null(문장 그대로). 마지막 "(숫자)" 뒤 꼬리는 점수 없는 줄로.
+function foundParts(found) {
+  if (!found) return null;
+  const parts = [];
+  let rest = found;
+  const re = /^(.+?)\s*\((\d+)\)\s*(?:[,.·:]\s*|$)/s;
+  for (let m; (m = rest.match(re)); rest = rest.slice(m[0].length)) parts.push([m[1].trim(), Number(m[2])]);
+  if (!parts.length) return null;
+  if (rest.trim()) parts.push([rest.trim().replace(/^[,.·:]\s*/, ""), null]);
+  return parts;
 }
 
 const chapter = (id, label, blocks, { pageBreak = true, kind = "" } = {}) =>
@@ -229,9 +257,19 @@ export function renderFlow(r) {
 <div><dt>Lighthouse</dt><dd>${lhOk ? `v${esc(lh.version)} ${ff}` : "측정 안 됨"}</dd></div>
 <div><dt>${r.author ? "작성" : "생성 도구"}</dt><dd>${esc(r.author || `${r.tool} v${r.version}`)}</dd></div>
 </dl>
-<p class="caption cover-note">이 보고서는 공개된 HTML, HTTP 응답, robots.txt, 사이트맵, llms.txt 와 Lighthouse 랩 측정으로 확인할 수 있는 조건만 점검합니다.</p>
+<p class="caption cover-note">이 보고서는 공개된 HTML, HTTP 응답, robots.txt, 사이트맵, llms.txt 와 Lighthouse 랩 측정으로 확인할 수 있는 조건만 점검합니다.<br>점수는 ${esc(r.author || "작성자")}의 자체 채점 기준에 따른 것으로, 검색엔진이나 AI 서비스가 매기는 공식 점수가 아닙니다.</p>
 </div>`,
   ], { kind: "cover" });
+
+  // 안내 쪽: 표지 다음, 머리글 · 바닥글 없이 쪽 한가운데에 글만. 보고서의 취지(성과 약속이 아니라 미리 대비하도록 돕는 자료)를 밝힌다.
+  const note = chapter("note", "안내", [
+    `<div class="note">
+<p class="note-title">이 보고서를 읽기 전에</p>
+<p>이 보고서는 “이렇게 하면 마케팅이 잘된다”는 약속이 아닙니다.<br>앞으로 검색 · 콘텐츠 · AI 검색 마케팅을 할 때 홈페이지가 걸림돌이 되지 않고<br>힘이 될 수 있도록, 기본 조건이 갖춰져 있는지 미리 살펴 드리는 자료입니다.</p>
+<p>검색엔진과 AI 서비스가 홈페이지를 읽을 수 있는지, 무엇을 하는 곳인지 이해할 수 있는지,<br>믿을 만한 정보가 드러나는지를 공개된 정보로 확인했습니다.</p>
+<p>점수는 ${esc(r.author || "작성자")}의 자체 기준으로 매긴 것입니다. 홈페이지의 가치를 평가하려는 것이 아니라,<br>지금 준비된 정도와 먼저 손보면 좋은 곳을 알려 드리기 위한 것입니다.</p>
+</div>`,
+  ], { kind: "note" });
 
   // 한눈에 보기
   const sectionSummary = (s) => {
@@ -256,7 +294,7 @@ export function renderFlow(r) {
       summaryRow("Lighthouse 성능", "별도", perf, metricLine, "lighthouse"),
       ...(cite ? [summaryRow("문단 인용 가능성", "참고", cite.score, `채점 문단 ${cite.count}개, 상위 5개 평균`, "cite")] : []),
       ...(rv ? [
-        summaryRow("브랜드 언급", "참고", rv.brand, "네이버 · 위키 · YouTube 등 외부 언급", "ai"),
+        summaryRow("브랜드 언급", "참고", rv.brand, "네이버 · 구글 · 위키 등 외부 언급", "ai"),
         summaryRow("E-E-A-T", "참고", rv.eeat, "경험 · 전문성 · 권위 · 신뢰", "ai"),
         summaryRow("AI 플랫폼 준비도", "참고", rv.platform, `${r.review.platforms.length}개 플랫폼 평균`, "ai"),
       ] : []),
@@ -364,22 +402,40 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
   const aiReview = chapter("ai", `${aiNum}  브랜드 · AI 판단 평가`, [
     secHead({
       num: aiNum, title: "브랜드 · AI 판단 평가", cat: "참고", q: "외부 브랜드 언급, E-E-A-T, AI 플랫폼별 준비도",
-      note: `브랜드명 “${b.name || r.host}” 기준입니다. 위키 · 네이버 · 나무위키 · YouTube 조회와 공식 채널 수집은 스크립트가 하고, 구글 검색 확인과 채점, E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 판단했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
+      note: `브랜드명 “${b.name || r.host}” 기준입니다. 근거는 스크립트가 연 네이버 · 나무위키 · YouTube 화면과 위키 API, 판단 평가 때 실제 Chrome 으로 연 구글 화면, 웹 검색(뉴스 · 커뮤니티 · LinkedIn)이고, 채점과 E-E-A-T · 플랫폼 평가는 Claude 가 고정 기준표로 했습니다. 판단이 들어간 참고 점수라 실행마다 몇 점 달라질 수 있으며 종합 점수에는 넣지 않습니다.`,
     }),
     rv ? statCards([scoreStat(rv.brand, "브랜드 언급"), scoreStat(rv.eeat, "E-E-A-T"), scoreStat(rv.platform, "AI 플랫폼 준비도"), scoreStat(cite?.score ?? null, "문단 인용 가능성")]) : "",
-    // 브랜드 언급 한 표: 플랫폼마다 Claude 확인 결과(점수 근거) + 조회 기록 + 점수. 판단 평가 전이면 조회 기록만.
+    // 브랜드 언급 한 표: 플랫폼마다 tbody 하나(플랫폼 · 점수 rowspan), 줄마다 세부 근거 | 배점.
+    // 판단 평가 전이면 세부 근거 대신 조회 줄(스크립트 원자료)만. 근거 주소는 JSON 에만 둔다.
     `<h3>브랜드 언급</h3>`,
     (() => {
-      const rec = brandRecords(b, v);
+      const rec = brandRecords(b);
       const items = v ? v.brand.items : REVIEW_BRAND.map(([platform, weight]) => ({ platform, weight }));
-      const rows = items.map((i) => {
-        const r = rec[i.platform];
-        return `<tr><td>${esc(i.platform)}</td><td>${i.found ? esc(i.found) : '<span class="muted">판단 평가 전</span>'}${r ? `<span class="sub">조회 기록 : ${esc(r)}</span>` : ""}${i.url ? `<span class="sub">${esc(i.url)}</span>` : ""}</td><td class="nowrap">${i.score == null ? '<span class="muted">–</span>' : `<b>${i.score}</b><span class="of"> / ${i.weight}</span>`}</td></tr>`;
+      const groups = items.map((i) => {
+        const r = rec[i.platform] || [];
+        const parts = foundParts(i.found);
+        const lines = [];
+        // 조회 줄은 판단 평가 전에만 보인다. 평가가 있으면 세부 근거가 같은 사실을 같은 실체로 확인해 점수와 함께 보여 준다(중복 방지).
+        if (r.length && !i.found) lines.push(`<td colspan="3" class="brec"><span class="brec-k">조회</span>${r.map(([k, x]) => `<span>${k ? `${esc(k)} ` : ""}${x}</span>`).join("")}</td>`);
+        if (!i.found) { if (!lines.length) lines.push('<td colspan="3" class="muted">판단 평가 전</td>'); }
+        else if (parts) {
+          // 점수 조각 수가 세부 배점 수와 같으면 순서대로 라벨을 붙인다(기준표 순서대로 쓰게 되어 있다). 점수 없는 꼬리는 "참고".
+          const sub = BRAND_SUB[i.platform] || [];
+          const scored = parts.filter(([, s]) => s != null).length;
+          let k = 0;
+          parts.forEach(([t, s]) => {
+            const label = s == null ? "참고" : scored === sub.length ? sub[k++] : "";
+            lines.push(`<td class="blabel">${esc(label)}</td><td>${esc(t)}</td><td class="bpt${s ? " tone-pass" : ""}">${s == null ? "" : s ? `+${s}` : "0"}</td>`);
+          });
+        } else lines.push(`<td colspan="3">${esc(i.found)}</td>`);
+        const score = `<td rowspan="${lines.length}" class="nowrap">${i.score == null ? '<span class="muted">–</span>' : `<b>${i.score}</b><span class="of"> / ${i.weight}</span>`}</td>`;
+        return `<tbody>${lines.map((l, k) => `<tr>${k ? l : `<td rowspan="${lines.length}">${esc(i.platform)}</td>${l}${score}`}</tr>`).join("")}</tbody>`;
       });
-      rows.push(`<tr><td>공식 채널</td><td>${b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : '<span class="muted">sameAs · 페이지 링크에서 찾지 못함</span>'}</td><td></td></tr>`);
-      return table(["34mm", "", "22mm"], ["플랫폼", "확인 결과 · 조회 기록", "점수"], rows);
+      groups.push(`<tbody><tr><td>공식 채널</td><td colspan="3">${b.channels?.length ? b.channels.map((c) => `${esc(c.platform)}<span class="sub">${esc(c.url)} (${esc(c.source)})</span>`).join("") : '<span class="muted">sameAs · 페이지 링크에서 찾지 못함</span>'}</td><td></td></tr></tbody>`);
+      return `<table class="tbl tbl--brand"><colgroup><col style="width:27mm"><col style="width:29mm"><col><col style="width:13mm"><col style="width:20mm"></colgroup>
+<thead><tr><th>플랫폼</th><th>항목</th><th>근거</th><th class="ctr">배점</th><th>점수</th></tr></thead>${groups.join("")}</table>`;
     })(),
-    `<p class="caption">조회 기록은 스크립트가 Chrome 으로 직접 연 화면(네이버 · 나무위키 · YouTube)과 위키 API 결과이며 동명 회사 결과가 섞일 수 있습니다. 구글은 자동화 브라우저를 막아 판단 평가 때 Claude 가 실제 Chrome 으로 연 화면을 기록했습니다. 점수는 같은 실체로 확인한 결과만 셉니다.</p>`,
+    `<p class="caption">${v ? "점수는 같은 실체로 확인한 결과만 셉니다." : "조회 건수는 브랜드 키워드가 제목에 든 첫 화면 결과 수라 동명 회사 결과가 섞여 있습니다. 판단 평가에서 같은 실체로 확인한 결과만 점수로 셉니다."}</p>`,
     ...(v
       ? [
           `<h3>E-E-A-T</h3>`,
@@ -387,7 +443,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
           `<h3>AI 플랫폼별 준비도</h3>`,
           table(["34mm", "", "22mm"], ["플랫폼", "강점 · 부족한 점", "점수"], v.platforms.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.strengths)}${p.gaps ? `<span class="fix"><b>부족 :</b>${esc(p.gaps)}</span>` : ""}</td><td class="nowrap"><b>${p.score}</b><span class="of"> / 100</span></td></tr>`)),
         ]
-      : [`<p>Claude 판단 평가(브랜드 검색 확인, E-E-A-T, AI 플랫폼별 준비도)가 아직 없습니다. 작성 후 <code>render.mjs --review</code> 로 다시 만들면 이 자리에 들어갑니다.</p>`]),
+      : [`<p>브랜드 언급 채점과 E-E-A-T · AI 플랫폼별 준비도 평가는 아직 없습니다. Claude 판단 평가를 작성한 뒤 <code>render.mjs --review</code> 로 다시 만들면 이 자리에 들어갑니다.</p>`]),
   ]);
 
   // 개선 로드맵: 우선순위 범례(건수 · 기준) + 과제 표
@@ -423,13 +479,14 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       ["렌더링 비교", "Chrome 으로 렌더링한 본문 텍스트 길이와 원본 HTML 텍스트 길이를 비교해 JavaScript 의존도를 봅니다."],
       ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다. 국내 검색 봇(네이버 Yeti · 다음 Daumoa)도 같은 방식으로 따로 확인합니다.`],
       ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /llms-full.txt, /ai.txt, TLS 인증서 체인, HTTP → HTTPS 리다이렉트, Accept: text/markdown 응답."],
-      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페) · 나무위키 · YouTube 검색은 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
+      ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페) · 나무위키 · YouTube 검색은 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다. 구글 검색은 자동화 브라우저를 막아 판단 평가 때 실제 Chrome 으로 확인합니다."],
       ...(r.files?.llmsDraft ? [["llms.txt 초안", `llms.txt 가 없어 사이트맵의 최대 20개 페이지로 초안을 만들었습니다. 결과 폴더의 ${esc(r.files.llmsDraft.split(/[\\/]/).pop())} 를 검토해 사이트 루트에 올리세요.`]] : []),
       ["Lighthouse", lhOk ? `v${esc(lh.version)} ${ff} 프리셋, 성능 · 접근성 · 권장사항 · SEO.` : "측정 안 됨."],
     ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`), "tbl tbl--kv"),
     r.notes?.length ? `<div class="callout"><h4>점검 시 참고</h4><ul>${r.notes.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>` : "",
     `<h3>채점 방식</h3>`,
     `<ul class="list">
+<li>이 보고서의 점수는 ${esc(r.author || "작성자")}가 공개 자료(Google 문서, 연구 결과 등)를 바탕으로 정한 자체 채점 기준에 따른 것이며, 검색엔진이나 AI 서비스가 매기는 공식 점수가 아닙니다. 브랜드 언급 · E-E-A-T · AI 플랫폼 점수는 판단이 들어간 참고 점수이고, Lighthouse 점수는 Google Lighthouse 측정값을 그대로 옮겼습니다.</li>
 <li>항목마다 통과 1점, 주의 0.5점, 실패 0점을 주고 가중치(1 ~ 3)를 곱해 섹션 점수를 100점으로 환산합니다. 해당 없음과 참고 항목은 계산에서 제외합니다.</li>
 <li>${["GEO", "AEO", "SEO"].map((c) => `${c} 는 ${r.sections.filter((s) => s.category === c).map((s) => s.name).join("과 ")}`).join(", ")} 섹션의 항목을 모아 같은 방식으로 계산합니다. 종합 점수는 세 영역의 평균입니다.</li>
 <li>페이지 유형에 따라 두 섹션이 바뀝니다. 콘텐츠(글) 페이지는 즉답 문단과 출처 · 수치 · 갱신일을, 메인 · 소개 페이지는 핵심 소개 문단과 운영 주체 · 신뢰 정보를 봅니다. 정보형 글에 맞춘 항목을 메인 페이지에 요구하지 않기 위해서입니다.</li>
@@ -462,7 +519,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
 <header class="toolbar"><p><b>${esc(TITLE)}</b>${esc(r.host)}</p><div class="toolbar-actions"><span data-total></span><button class="btn" type="button" onclick="print()">인쇄 또는 PDF 저장</button></div></header>
 <main class="book" id="book"></main>
 <div id="flow">
-${[cover, summary, ...sections, lighthouse, citation, aiReview, roadmap, appendix].join("\n")}
+${[cover, note, summary, ...sections, lighthouse, citation, aiReview, roadmap, appendix].join("\n")}
 </div>
 <script type="application/json" id="report-meta">${JSON.stringify(meta).replace(/</g, "\\u003c")}</script>
 <script>(()=>{const f=()=>document.documentElement.style.setProperty("--fit",Math.min(1,(innerWidth-16)/794).toFixed(3));f();addEventListener("resize",f);})();</script>
@@ -501,15 +558,15 @@ export function paginate() {
   };
   const limit = (body) => body.getBoundingClientRect().bottom - SLACK;
   const fits = (body) => !body.lastElementChild || body.lastElementChild.getBoundingClientRect().bottom <= limit(body);
-  const pieces = (b) => (b.matches("table") ? [...(b.tBodies[0]?.rows || [])] : b.matches("ul, ol") ? [...b.children] : null);
+  // 표는 행 단위, tbody 가 여러 개면(rowspan 묶음 표) tbody 단위로 나눠 묶음이 쪽 경계에서 잘리지 않게 한다.
+  const pieces = (b) => (b.matches("table") ? (b.tBodies.length > 1 ? [...b.tBodies] : [...(b.tBodies[0]?.rows || [])]) : b.matches("ul, ol") ? [...b.children] : null);
   const shell = (b, items, kept) => {
     const s = b.cloneNode(false);
     delete s.dataset.start;
     if (b.matches("table")) {
       for (const c of b.children) if (c.tagName !== "TBODY") s.append(c.cloneNode(true));
-      const tb = document.createElement("tbody");
-      tb.append(...items);
-      s.append(tb);
+      if (items[0]?.tagName === "TBODY") s.append(...items);
+      else { const tb = document.createElement("tbody"); tb.append(...items); s.append(tb); }
     } else {
       if (b.matches("ol")) s.start = (b.start || 1) + kept;
       s.append(...items);
@@ -519,8 +576,8 @@ export function paginate() {
 
   let body = null;
   for (const ch of [...flow.children]) {
-    if (ch.dataset.kind === "cover") {
-      const sheet = el("section", "sheet sheet--cover");
+    if (ch.dataset.kind === "cover" || ch.dataset.kind === "note") { // 표지 · 안내 쪽은 머리글 · 바닥글 없이 통째로 한 쪽
+      const sheet = el("section", `sheet sheet--${ch.dataset.kind}`);
       sheet.append(...ch.childNodes);
       book.append(sheet);
       body = null;
@@ -541,7 +598,8 @@ export function paginate() {
         let at = items.findIndex((x) => x.getBoundingClientRect().bottom > lim);
         if (at === -1) at = items.length - 1;
         if (items.length - at < 2) at = items.length - 2; // 다음 쪽에 한 행만 남기지 않는다
-        if (at >= 2) {
+        // 행이 높은 표(브랜드 언급처럼 한 행이 120px 넘음)는 한 행만 들어가도 나눈다. 두 행을 고집하면 쪽 아래가 통째로 빈다.
+        if (at >= (items[0].getBoundingClientRect().height > 120 ? 1 : 2)) {
           const rest = shell(blk, items.slice(at), at);
           if (blk.matches("table")) {
             const cont = el("p", "cont", "앞 쪽 표에서 이어집니다");

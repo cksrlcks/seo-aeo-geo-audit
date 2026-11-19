@@ -295,6 +295,16 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; }
 .tbl .muted { color: var(--ink-3); }
 .tbl .sub { display: block; margin-top: 2px; font-size: var(--t-caption); font-weight: 400; color: var(--ink-3); }
 .tbl .fix { display: block; margin-top: var(--s-1); color: var(--ink); }
+/* 브랜드 언급 표: 플랫폼마다 tbody 하나(플랫폼 · 점수 rowspan, 조회 줄 colspan 2). 쪽 나누기는 tbody 단위 */
+.tbl--brand tbody td { background: none !important; } /* 줄무늬 바탕 없이 모든 줄을 가로선으로 나눈다. 플랫폼 · 점수 칸은 rowspan 이라 선이 지나가지 않아 묶음이 보인다 */
+.tbl--brand tbody tr:not(:first-child) > td:first-child:not(.blabel) { padding-left: var(--s-2); font-weight: 400; color: var(--ink-2); } /* rowspan 아래 줄의 첫 칸은 내용 칸이다 */
+.tbl--brand tbody td.blabel { padding-left: var(--s-2); font-weight: 500; color: var(--ink); } /* 세부 배점 이름 */
+.tbl--brand .brec { color: var(--ink-3); }
+.tbl--brand .brec > span + span { margin-left: var(--s-4); }
+.tbl--brand .brec b { font-weight: 600; color: var(--ink); }
+.tbl--brand .brec-k { font-size: var(--t-caption); font-weight: 600; color: var(--navy); }
+.tbl--brand .bpt { text-align: center; font-weight: 700; color: var(--ink-3); }
+.tbl--brand .bpt.tone-pass { color: var(--pass); }
 .tbl .fix b { margin-right: var(--s-1); color: var(--navy); }
 .tbl--kv tbody th { font-weight: 500; white-space: normal; vertical-align: top; color: var(--ink); background: var(--fill); border-bottom: 1px solid var(--line); }
 .tbl--kv tbody tr:nth-child(even) td { background: none; }
@@ -332,6 +342,12 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; }
 
 /* ---------- 표지 ---------- */
 .sheet--cover { display: flex; flex-direction: column; background: var(--navy); color: var(--on-navy-2); }
+/* 안내 쪽: 머리글 · 바닥글 없이 쪽 한가운데에 글만(가운데 정렬, 줄 길이 균형) */
+.sheet--note { display: flex; align-items: center; justify-content: center; }
+.note { max-width: 172mm; text-align: center; } /* 줄은 의미 단위로 직접 나눈다(<br>) */
+.note p { color: var(--ink-2); line-height: 1.9; }
+.note p + p { margin-top: var(--s-4); }
+.note .note-title { margin-bottom: var(--s-6); font-size: var(--t-section); font-weight: 700; color: var(--navy); }
 .cover-top {
   flex: 1;
   display: flex; flex-direction: column;

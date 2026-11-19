@@ -27,7 +27,7 @@ URL 하나를 받아 **측정 가능한 조건**만 자동 점검하고, 점수�
    node "<skill-dir>/scripts/audit.mjs" <url> --page-type <home|content> --out <결과 폴더>
    ```
    1 ~ 3분 걸린다. 끝나면 stdout 에 점수 요약, 우선 개선 과제, 파일 경로와 HTML · PDF 쪽수가 찍힌다.
-   보고서는 표지 → 한눈에 보기 → SECTION 01 ~ 07(측정 6개 + Lighthouse) → 08 문단 인용 가능성 · 09 브랜드 · AI 판단 평가(참고) → 개선 로드맵 → 부록 순서이고, HTML 과 PDF 는 쪽 구성이 같다. HTML 은 브라우저에서 A4 쪽 단위로 보이며 인쇄 버튼으로 PDF 를 다시 만들 수 있어 그대로 고객에게 보낼 수 있다. 디자인 규칙은 `reference/report-style-guide.md`. 사용자가 작성 기관을 밝혔으면 `--author` 로 표지와 바닥글에 넣는다.
+   보고서는 표지 → 안내(보고서 취지, 글만 있는 한 쪽) → 한눈에 보기 → SECTION 01 ~ 07(측정 6개 + Lighthouse) → 08 문단 인용 가능성 · 09 브랜드 · AI 판단 평가(참고) → 개선 로드맵 → 부록 순서이고, HTML 과 PDF 는 쪽 구성이 같다. HTML 은 브라우저에서 A4 쪽 단위로 보이며 인쇄 버튼으로 PDF 를 다시 만들 수 있어 그대로 고객에게 보낼 수 있다. 디자인 규칙은 `reference/report-style-guide.md`. 사용자가 작성 기관을 밝혔으면 `--author` 로 표지와 바닥글에 넣는다.
 5. **결과 확인** — stdout 에서 HTML 과 PDF 쪽수가 같고 1 이상이면 유효하다. 다르다는 경고가 찍히면 쪽 높이를 넘친 블록이 있는 것이니 HTML 을 열어 확인한다.
 6. **Claude 판단 평가** — `reference/ai-review.md` 를 읽고 그 기준표대로 브랜드 언급(네이버 · 나무위키 · YouTube 는 점검 JSON 의 `brand.search` 화면 기록, 구글은 Claude in Chrome 등 실제 브라우저로 직접 연 검색 화면, 뉴스 · 커뮤니티 · LinkedIn 은 웹 검색), E-E-A-T, AI 플랫폼별 준비도(네이버 AI 브리핑 포함)를 판단해 결과 폴더에 `review.json` 을 쓴다. 근거는 점검 JSON 과 직접 연 페이지 · 검색 결과만 쓰고, 확인 못 한 것은 0점 + "확인 불가" 로 둔다. 그다음 보고서를 다시 만든다.
    ```bash

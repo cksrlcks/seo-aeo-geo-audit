@@ -201,14 +201,10 @@ b, strong { font-weight: 600; color: var(--ink); }
   display: grid; grid-template-columns: auto 1fr 58mm; align-items: center; gap: var(--s-5);
   padding: var(--s-3) 0;
 }
-/* 원형 차트: 링은 원뿔 그라디언트 + 원형 마스크(::before), 시작 캡 · 끝 캡은 링 두께만 한 원, 끝 캡 안에 흰 원 핸들 */
+/* 원형 차트: SVG 원호를 짧은 조각으로 나눠 g2(밝게) → g1(선명) 색을 바꿔 그리고, 시작 · 끝은 링 두께만 한 원(report.mjs ring). PDF 뷰어마다 같게 보이도록 conic-gradient · mask 는 쓰지 않는다 */
 :where(.ring) { --g1: var(--neutral); --g2: var(--neutral); } /* 기본값은 우선순위 0: .ring--{tone} 이 이기게 */
-.ring { --w: 10px; position: relative; display: grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size); }
-.ring::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--g2) 0, var(--g1) calc(var(--p) * 1%), var(--track) 0); -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--w)), #000 calc(100% - var(--w) + 0.5px)); mask: radial-gradient(farthest-side, transparent calc(100% - var(--w)), #000 calc(100% - var(--w) + 0.5px)); }
-.ring-cap, .ring-end { position: absolute; inset: 0; pointer-events: none; }
-.ring-cap::before, .ring-end::before { content: ""; position: absolute; top: 0; left: calc(50% - var(--w) / 2); width: var(--w); height: var(--w); border-radius: 50%; background: var(--g2); }
-.ring-end { transform: rotate(calc(var(--p) * 3.6deg)); }
-.ring-end::before { background: var(--g1); }
+.ring { position: relative; display: grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size); }
+.ring-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .ring-num { position: relative; font-size: 30pt; font-weight: 700; line-height: 1; letter-spacing: -0.05em; color: var(--ink); }
 .score-text { display: flex; flex-direction: column; gap: var(--s-1); }
 .score-title { font-size: var(--t-caption); font-weight: 600; color: var(--ink-3); }

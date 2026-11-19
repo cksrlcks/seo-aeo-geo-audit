@@ -97,9 +97,21 @@ ${desc ? `<p class="sec-desc">${desc}</p>` : ""}${note ? `<div class="sec-note">
 }
 
 // 종합 점수 원형 차트: 판정 구간 두 색 원뿔 그라디언트(시작 밝게 → 끝 선명), 시작 · 끝은 둥글게. 가운데 점수만
+// conic-gradient + 마스크는 PDF 뷰어마다 다르게 그려져서, SVG 원호를 짧은 조각으로 나눠 색을 조금씩 바꿔 그린다.
+// ponytail: 조각 수 = 점수 / 2(최대 50). 조각 사이 이음매가 보이면 겹침(0.4°)을 늘린다.
 function ring(score, px = 132, label = "종합 점수") {
   const b = band(score);
-  return `<div class="ring ring--${b.tone}" style="--p:${score ?? 0}; --size:${px}px" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">${score ? '<i class="ring-cap"></i><i class="ring-end"></i>' : ""}<span class="ring-num">${score ?? "–"}</span></div>`;
+  const w = 10, r = (px - w) / 2, c = px / 2;
+  const pt = (deg) => { const a = (deg * Math.PI) / 180; return `${(c + r * Math.sin(a)).toFixed(2)} ${(c - r * Math.cos(a)).toFixed(2)}`; };
+  const end = (score ?? 0) * 3.6, n = Math.max(1, Math.ceil((score ?? 0) / 2));
+  const mix = (t) => `color-mix(in srgb, var(--g1) ${Math.round(t * 100)}%, var(--g2))`; // 시작 밝게(g2) → 끝 선명(g1)
+  const segs = score ? Array.from({ length: n }, (_, i) => {
+    const a0 = (end * i) / n, a1 = Math.min(end, (end * (i + 1)) / n + 0.4);
+    return `<path d="M ${pt(a0)} A ${r} ${r} 0 0 1 ${pt(a1)}" style="stroke:${mix((i + 0.5) / n)}"/>`;
+  }).join("") : "";
+  const cap = (deg, color) => { const [x, y] = pt(deg).split(" "); return `<circle cx="${x}" cy="${y}" r="${w / 2}" style="fill:${color}"/>`; };
+  const svg = `<svg class="ring-svg" viewBox="0 0 ${px} ${px}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" fill="none" style="stroke:var(--track)" stroke-width="${w}"/><g fill="none" stroke-width="${w}">${segs}</g>${score ? cap(0, "var(--g2)") + cap(end, "var(--g1)") : ""}</svg>`;
+  return `<div class="ring ring--${b.tone}" style="--size:${px}px" role="img" aria-label="${label} ${score ?? "측정 안 됨"}점, ${b.label}">${svg}<span class="ring-num">${score ?? "–"}</span></div>`;
 }
 
 // 종합 점수표: 원형 차트 + 구간 · 설명 + SEO · AEO · GEO 막대
@@ -398,7 +410,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       ["페이지 유형", `${esc(typeLabel)} (${esc(typeHow)}). 근거: ${esc((typeInfo.reasons || []).join(", ") || "없음")}`],
       ["원본 HTML", "브라우저 User-Agent 로 받은 HTML 을 정적 분석합니다. title, meta, canonical, 헤딩, 링크, 이미지, JSON-LD, 본문 문장."],
       ["렌더링 비교", "Chrome 으로 렌더링한 본문 텍스트 길이와 원본 HTML 텍스트 길이를 비교해 JavaScript 의존도를 봅니다."],
-      ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다.`],
+      ["크롤러 접근", `/robots.txt 를 Google 방식으로 해석해 AI 봇 ${r.bots.length}종의 허용 여부를 판정하고, 4종 봇 User-Agent 로 실제 요청해 응답 코드를 확인합니다. 국내 검색 봇(네이버 Yeti · 다음 Daumoa)도 같은 방식으로 따로 확인합니다.`],
       ["보조 파일", "/sitemap.xml(robots.txt 의 Sitemap 지시어 우선), /llms.txt, /llms-full.txt, /ai.txt, TLS 인증서 체인, HTTP → HTTPS 리다이렉트, Accept: text/markdown 응답."],
       ["브랜드 조회", "브랜드명(Organization.name → og:site_name → title)으로 위키백과(한국어 · 영어) · Wikidata API 를 조회합니다. 네이버(통합 · 뉴스 · 블로그 · 카페) · 나무위키 · YouTube 검색은 Chrome 으로 직접 열어 화면을 기록하고, sameAs 와 페이지 링크에서 공식 채널을 모읍니다."],
       ...(r.files?.llmsDraft ? [["llms.txt 초안", `llms.txt 가 없어 사이트맵의 최대 20개 페이지로 초안을 만들었습니다. 결과 폴더의 ${esc(r.files.llmsDraft.split(/[\\/]/).pop())} 를 검토해 사이트 루트에 올리세요.`]] : []),

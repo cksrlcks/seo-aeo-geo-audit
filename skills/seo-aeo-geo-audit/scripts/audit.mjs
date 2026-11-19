@@ -331,9 +331,15 @@ async function runLighthouse(url) {
   }
 }
 
-async function probeBots() {
+// 국내 검색 봇: 네이버(Yeti) · 다음(Daumoa). robots.txt 판정 + 실제 UA 요청을 'kr-bots' 한 항목으로 채점한다(AI 봇 목록과 따로).
+// UA 는 공식 문서가 없어 봇 목록 사이트들이 공통으로 적은 값을 쓴다. 다음은 robots.txt 이름이 Daumoa, 요청 UA 는 Daum/4.1.
+const KR_BOTS = [
+  { token: "Yeti", vendor: "Naver", role: "네이버 검색 · AI 브리핑", probeUa: "Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)" },
+  { token: "Daumoa", vendor: "Kakao", role: "다음 검색", probeUa: "Mozilla/5.0 (compatible; Daum/4.1; +http://cs.daum.net/faq/15/4118.html?faqId=28966)" },
+];
+async function probeBots(list) {
   const out = {};
-  await Promise.all(AI_BOTS.filter((b) => b.probeUa).map(async (b) => {
+  await Promise.all(list.filter((b) => b.probeUa).map(async (b) => {
     let r = await fetchFollow(page.url, { ua: b.probeUa, timeout: 15000 });
     // 5xx · 연결 실패는 일시적일 수 있어 2초 뒤 한 번 더 시도한다. 403 · 429 는 명시적 차단이라 그대로 둔다.
     if (r.status === 0 || r.status >= 500) {
@@ -349,15 +355,16 @@ console.error("▶ robots.txt · sitemap · llms.txt · AI 봇 응답 · 렌더�
 // HTTP 주소가 HTTPS 로 보내는지는 첫 응답만 본다. 80 포트가 닫혀 있으면(null) 중복 주소가 없으니 정상으로 친다.
 const httpProbe = () => fetch(`http://${finalUrl.host}${finalUrl.pathname}${finalUrl.search}`, { redirect: "manual", signal: AbortSignal.timeout(10000), headers: { "user-agent": BROWSER_UA } })
   .then((r) => { r.body?.cancel().catch(() => {}); return { status: r.status, location: r.headers.get("location") || "" }; }, () => null);
-const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes] = await Promise.all([
+const [llmsRes, llmsFullRes, aiTxtRes, mdRes, httpRes, probes, rendered, tlsRes, krProbes] = await Promise.all([
   fetchFollow(origin + "/llms.txt"),
   fetchFollow(origin + "/llms-full.txt"),
   fetchFollow(origin + "/ai.txt"),
   fetchFollow(page.url, { accept: "text/markdown", timeout: 15000 }),
   finalUrl.protocol === "https:" ? httpProbe() : Promise.resolve(null),
-  probeBots(),
+  probeBots(AI_BOTS),
   renderedText(page.url),
   finalUrl.protocol === "https:" ? tlsProbe(finalUrl.hostname, Number(finalUrl.port) || 443) : Promise.resolve(null),
+  probeBots(KR_BOTS),
 ]);
 // Lighthouse 는 CPU 를 나눠 쓰면 TBT 가 부풀어 점수가 크게 떨어지므로 다른 수집이 끝난 뒤 단독으로 돌린다.
 console.error(`▶ Lighthouse (${opts.desktop ? "데스크톱" : "모바일"}) 측정 중…`);
@@ -491,6 +498,9 @@ const citationBots = bots.filter((b) => b.citation);
 const blockedCitation = citationBots.filter((b) => !b.allowed);
 const blockedTraining = bots.filter((b) => !b.citation && !b.allowed);
 const probeBlocked = bots.filter((b) => b.probe != null && !(b.probe >= 200 && b.probe < 400));
+// 국내 검색 봇 판정(facts.koBots 로도 남겨 네이버 AI 브리핑 평가에 쓴다)
+const koBots = KR_BOTS.map(({ probeUa, ...b }) => ({ ...b, ...robotsAllows(robots, b.token, finalUrl.pathname), probe: krProbes[b.token] ?? null }));
+const koBad = koBots.filter((b) => (robotsRes.ok && !b.allowed) || !(b.probe >= 200 && b.probe < 400));
 
 // ---------- 체크 ----------
 const S = {
@@ -548,6 +558,7 @@ const CRITERIA = {
   "tls-chain": "공개 루트로 검증",
   redirects: "1회 이하",
   "robots-txt": "Sitemap 지시어 포함",
+  "kr-bots": "robots.txt 허용 · 실제 요청 2xx · 3xx",
   sitemap: "XML 사이트맵",
   h1: "1개",
   "heading-order": "건너뛰기 · 빈 헤딩 0",
@@ -948,6 +959,11 @@ add(S.tech, "redirects", "리다이렉트 체인", 2, page.hops.length <= 1 ? "p
     blockAll ? "User-agent: * 에 Disallow: / 가 있어 모든 크롤러가 차단됩니다. 스테이징 설정이 배포되지 않았는지 확인하세요." : st === "pass" ? "" : "robots.txt 에 Sitemap: 절대 URL 을 추가하세요.",
     !robotsRes.ok ? `HTTP ${robotsRes.status}` : !robotsIsText ? "HTML 반환" : blockAll ? "전체 차단" : robots.sitemaps.length ? "Sitemap 있음" : "Sitemap 없음");
 }
+add(S.tech, "kr-bots", "국내 검색 봇 접근 (네이버 · 다음)", 3,
+  koBad.length === 0 ? "pass" : koBad.length < koBots.length ? "warn" : "fail",
+  koBots.map((b) => `${b.token}(${b.vendor === "Naver" ? "네이버" : "다음"}) robots.txt ${!robotsRes.ok ? "없음(허용)" : b.allowed ? "허용" : "차단"} · HTTP ${b.probe}`).join(", "),
+  koBad.length ? `${koBad.map((b) => b.token).join(", ")} 이 막혀 있습니다. robots.txt 의 Disallow 와 WAF · 보안 플러그인 · CDN 의 봇 차단 규칙(403 · 429)을 확인하세요. 막히면 네이버 · 다음 검색과 네이버 AI 브리핑에 페이지가 나오지 않습니다.` : "",
+  `${koBots.length - koBad.length}/${koBots.length} 정상`);
 {
   const sm = sitemapRes.text || "";
   const isXml = sitemapRes.ok && /<(urlset|sitemapindex)[\s>]/i.test(sm);
@@ -1251,7 +1267,6 @@ search.youtube = await browse(`https://www.youtube.com/results?search_query=${en
 });
 const brand = { name: brandName, wikipedia: { ko: wikiKo, en: wikiEn }, wikidata, channels, search };
 // Claude 의 플랫폼 평가(네이버 AI 브리핑)에 쓰는 네이버 검색 봇 robots.txt 판정. 점수 미반영.
-const koBots = ["Yeti"].map((token) => ({ token, ...robotsAllows(robots, token, finalUrl.pathname) }));
 
 // ---------- 참고: JSON-LD 예시 (페이지에서 읽은 값으로 채우고 모르는 값은 <빈칸>) ----------
 const jsonld = (() => {

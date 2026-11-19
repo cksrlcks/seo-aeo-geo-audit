@@ -36,7 +36,7 @@
 | md-negotiation | Markdown 응답 | – | 참고만. `Accept: text/markdown` 요청에 Content-Type text/markdown 이면 지원 | Cloudflare Markdown for Agents 등. 지원하지 않아도 감점 없음 |
 
 검색 · 인용용(감점 대상) 토큰: Googlebot, Bingbot, OAI-SearchBot, ChatGPT-User, Claude-SearchBot, Claude-User, PerplexityBot, Perplexity-User, DuckAssistBot, Applebot, MistralAI-User, Meta-ExternalFetcher.
-네이버 검색 봇 Yeti 는 판정만 `facts.koBots` 에 남기고 감점하지 않는다. 네이버 AI 브리핑 준비도 평가(`ai-review.md`)에 쓴다.
+국내 검색 봇(네이버 Yeti · 다음 Daumoa)은 AI 봇 목록과 따로 6장 `kr-bots` 항목으로 채점하고, 판정(robots.txt · 실제 요청 응답)을 `facts.koBots` 에도 남겨 네이버 AI 브리핑 준비도 평가(`ai-review.md`)에 쓴다.
 학습 · 제어용(감점 없음): GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Bytespider, CCBot, meta-externalagent, Amazonbot.
 robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, 가장 긴 규칙 우선, 동률이면 Allow)으로 현재 페이지 경로에 대해 계산한다.
 
@@ -126,6 +126,7 @@ robots.txt 판정은 Google 방식(토큰 정확 일치 그룹 → `*` 그룹, �
 | tls-chain | TLS 인증서 체인 검증 | 3 | Node 내장 공개 루트 저장소만으로 검증 성공 / – / 중간 인증서 누락 · 만료 · 도메인 불일치 · 자체 서명 | 브라우저는 AIA 로 중간 인증서를 받아오지만 OpenSSL 기반 크롤러 · AI 봇 대부분은 접속 실패. 검증 실패 시 스크립트는 OS 인증서 저장소(`--use-system-ca`)로 재시도해 나머지 점검을 계속한다 |
 | redirects | 리다이렉트 체인 | 2 | ≤ 1홉 / ≤ 3홉 / 초과 | Googlebot 은 최대 10홉까지 추적. 최종 URL 로 1회에 도달하게 |
 | robots-txt | robots.txt | 2 | 텍스트 + Sitemap 지시어 / 없음 또는 Sitemap 미기재 / HTML 반환 · 전체 차단 | RFC 9309 · Google robots.txt 문서: Sitemap 은 절대 URL. 스테이징의 Disallow: / 배포 사고 방지 |
+| kr-bots | 국내 검색 봇 접근 (네이버 · 다음) | 3 | Yeti · Daumoa 둘 다 robots.txt 허용 + 실제 요청 2xx · 3xx / 하나만 정상 / 둘 다 막힘. robots.txt 가 없으면 허용으로 본다. 요청 UA 는 `Yeti/1.1`, `Daum/4.1`(robots.txt 이름은 Daumoa). 5xx · 연결 실패는 2초 뒤 한 번 더 요청한 결과 | 네이버 · 다음 검색 점유가 큰 국내 환경에서 두 봇이 막히면 해당 검색과 네이버 AI 브리핑에 페이지가 나오지 않는다. robots.txt 와 별개로 WAF · CDN 봇 차단도 확인 |
 | sitemap | XML 사이트맵 | 2 | urlset · sitemapindex / 200 이지만 XML 아님 / 없음 | sitemaps.org |
 | h1 | H1 1개 | 2 | 1개 / 2개 이상 / 0개 | 문서 구조 · 접근성 관례(순위 신호는 아님) |
 | heading-order | 레벨 건너뛰기 · 빈 헤딩 | 1 | 0 / ≤ 2 / 초과 | 접근성(WCAG) 헤딩 계층 |

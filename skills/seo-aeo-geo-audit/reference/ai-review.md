@@ -132,4 +132,4 @@
 | | `score` | 필수 | 0 ~ 100 |
 | | `strengths` · `gaps` | 필수 | 빈 문자열 금지 |
 
-`render.mjs` 가 이 표대로 검사하고, 틀리면 보고서를 만들지 않고 오류 위치를 출력한다. 항목 이름 · 순서 · weight 는 `scripts/report.mjs` 의 `REVIEW_BRAND` · `REVIEW_EEAT` · `REVIEW_PLATFORMS` 와 같아야 한다(이 표를 바꾸면 같이 고친다). 보고서를 만든 뒤 HTML · PDF 쪽수를 세어 함께 출력하며, 다르면 경고하고 종료 코드 3 으로 끝난다.
+`render.mjs` 가 이 표대로 검사하고(브랜드 언급은 `found` 의 세부 근거 수가 세부 배점 수와 같은지, 세부 점수 합이 `score` 와 같은지도 본다), 틀리면 보고서를 만들지 않고 오류 위치를 출력한다. 항목 이름 · 순서 · weight 는 `scripts/report.mjs` 의 `REVIEW_BRAND` · `REVIEW_EEAT` · `REVIEW_PLATFORMS` 와 같아야 한다(이 표를 바꾸면 같이 고친다). 보고서를 만든 뒤 HTML · PDF 쪽수를 세어 함께 출력하며, 다르면 경고하고 종료 코드 3 으로 끝난다.

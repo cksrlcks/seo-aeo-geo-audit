@@ -198,7 +198,7 @@ function brandRecords(b) {
 }
 
 // 브랜드 언급 세부 배점 이름(reference/ai-review.md 표의 순서). 보고서 세부 근거의 라벨이 된다.
-const BRAND_SUB = {
+export const BRAND_SUB = {
   네이버: ["공식 사이트 노출", "정보 영역", "뉴스", "블로그 · 카페"],
   구글: ["공식 사이트 노출", "사이트 하위 링크", "비즈니스 프로필", "Google 리뷰"],
   위키: ["나무위키", "위키백과", "Wikidata"],
@@ -208,15 +208,22 @@ const BRAND_SUB = {
   LinkedIn: ["회사 페이지", "활동"],
 };
 // review 의 found("공식 사이트 1위(10), 정보 영역 없음(0), …")를 세부 배점별 [문구, 점수] 로 나눈다.
-// 구분은 "(숫자)" 뒤의 쉼표 · 마침표 · 가운뎃점 · 쌍점. 점수 조각이 없으면 null(문장 그대로). 마지막 "(숫자)" 뒤 꼬리는 점수 없는 줄로.
-function foundParts(found) {
+// 구분은 "(숫자)" 뒤의 쉼표 · 마침표 · 가운뎃점 · 쌍점. 숫자가 max(그 칸의 weight)보다 크면 배점이 아니라 본문이다
+// (예: "문서 없음(404)" 의 HTTP 코드). 점수 조각이 없으면 null(문장 그대로). 마지막 "(숫자)" 뒤 꼬리는 점수 없는 줄로.
+export function foundParts(found, max = Infinity) {
   if (!found) return null;
   const parts = [];
-  let rest = found;
-  const re = /^(.+?)\s*\((\d+)\)\s*(?:[,.·:]\s*|$)/s;
-  for (let m; (m = rest.match(re)); rest = rest.slice(m[0].length)) parts.push([m[1].trim(), Number(m[2])]);
+  const re = /\s*\((\d+)\)\s*(?:[,.·:]\s*|$)/g;
+  let start = 0;
+  for (let m; (m = re.exec(found)); ) {
+    if (Number(m[1]) > max) continue;
+    const text = found.slice(start, m.index).trim();
+    if (text) parts.push([text, Number(m[1])]);
+    start = re.lastIndex;
+  }
   if (!parts.length) return null;
-  if (rest.trim()) parts.push([rest.trim().replace(/^[,.·:]\s*/, ""), null]);
+  const tail = found.slice(start).trim().replace(/^[,.·:]\s*/, "");
+  if (tail) parts.push([tail, null]);
   return parts;
 }
 
@@ -413,7 +420,7 @@ ${withTip ? `<p class="pcard-fix"><b>개선 :</b>${esc(weakest(p)[3])}</p>` : ""
       const items = v ? v.brand.items : REVIEW_BRAND.map(([platform, weight]) => ({ platform, weight }));
       const groups = items.map((i) => {
         const r = rec[i.platform] || [];
-        const parts = foundParts(i.found);
+        const parts = foundParts(i.found, i.weight);
         const lines = [];
         // 조회 줄은 판단 평가 전에만 보인다. 평가가 있으면 세부 근거가 같은 사실을 같은 실체로 확인해 점수와 함께 보여 준다(중복 방지).
         if (r.length && !i.found) lines.push(`<td colspan="3" class="brec"><span class="brec-k">조회</span>${r.map(([k, x]) => `<span>${k ? `${esc(k)} ` : ""}${x}</span>`).join("")}</td>`);

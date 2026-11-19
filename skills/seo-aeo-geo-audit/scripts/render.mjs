@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import puppeteer from "puppeteer-core";
-import { countPages, paginate, renderFlow, REVIEW_BRAND, REVIEW_EEAT, REVIEW_PLATFORMS } from "./report.mjs";
+import { BRAND_SUB, countPages, foundParts, paginate, renderFlow, REVIEW_BRAND, REVIEW_EEAT, REVIEW_PLATFORMS } from "./report.mjs";
 
 const args = process.argv.slice(2);
 const ri = args.indexOf("--review");
@@ -33,6 +33,13 @@ function validateReview(v) {
       const w = REVIEW_BRAND[k][1];
       if (i.weight !== w) errs.push(`brand.items[${k}].weight: ${w} 이어야 합니다 (받은 값 ${JSON.stringify(i.weight)})`);
       str(i.found, `brand.items[${k}].found`); num(i.score, 0, w, `brand.items[${k}].score`); opt(i.url, `brand.items[${k}].url`);
+      // 마지막 점검: found 의 세부 근거가 기준표의 세부 배점 수 · 칸 점수와 맞는지(보고서 라벨 · 배점 열이 이 값으로 그려진다)
+      if (typeof i.found !== "string" || typeof i.score !== "number") return;
+      const sub = BRAND_SUB[i.platform] || [];
+      const scored = (foundParts(i.found, w) || []).filter(([, s]) => s != null);
+      const where = `brand.items[${k}].found (${i.platform})`;
+      if (scored.length !== sub.length) errs.push(`${where}: 세부 배점 ${sub.length}개(${sub.join(" · ")})를 순서대로 "근거(점수)" 로 써야 합니다 (읽힌 점수 ${scored.length}개)`);
+      else if (scored.reduce((a, [, s]) => a + s, 0) !== i.score) errs.push(`${where}: 세부 점수 합 ${scored.reduce((a, [, s]) => a + s, 0)} 이 score ${i.score} 와 다릅니다`);
     });
   if (names(v?.eeat, "name", REVIEW_EEAT, "eeat"))
     v.eeat.forEach((e, k) => { str(e.evidence, `eeat[${k}].evidence`); str(e.fix, `eeat[${k}].fix`); num(e.score, 0, 25, `eeat[${k}].score`); });
